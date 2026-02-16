@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import { getForecast } from './services/api';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Box,
   Typography,
@@ -6,233 +7,408 @@ import {
   CardContent,
   Button,
   IconButton,
-  Chip,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  Paper,
   Select,
   MenuItem,
   Avatar,
   Menu,
   MenuItem as MenuItemComponent,
+  Divider,
+  Alert,
+  CircularProgress,
+  LinearProgress,
+  Chip,
   Dialog,
   DialogTitle,
   DialogContent,
   DialogActions,
-  LinearProgress,
-  Divider,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableRow,
+  Tooltip,
 } from '@mui/material';
 import {
-  CloudUpload as CloudUploadIcon,
   HealthAndSafety as HealthAndSafetyIcon,
   Dashboard as DashboardIcon,
   TrendingUp as TrendingUpIcon,
   History as HistoryIcon,
+  CloudUpload as CloudUploadIcon,
   Psychology as PsychologyIcon,
+  TrendingUp as TrendingUpSmallIcon,
+  TrendingDown as TrendingDownIcon,
+  Remove as RemoveIcon,
   MoreVert as MoreVertIcon,
-  Visibility as VisibilityIcon,
+  CheckCircle as CheckCircleIcon,
   Download as DownloadIcon,
   Delete as DeleteIcon,
-  CheckCircle as CheckCircleIcon,
-  PendingActions as PendingIcon,
-  Error as ErrorIcon,
-  CalendarMonth as CalendarIcon,
-  Analytics as AnalyticsIcon,
-  CloudQueue as CloudIcon,
-  ArrowUpward as ArrowUpwardIcon,
-  ArrowDownward as ArrowDownwardIcon,
+  Visibility as VisibilityIcon,
+  Lightbulb as LightbulbIcon,
 } from '@mui/icons-material';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell, ComposedChart } from 'recharts';
+import {
+  ResponsiveContainer,
+  ComposedChart,
+  Bar,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip as RechartsTooltip,
+  Legend,
+} from 'recharts';
 import './Dashboard.css';
 
-const Prediction = ({ onNavigate, onLogout }) => {
-  const [selectedDisease, setSelectedDisease] = useState('dengue');
+// ── Known disease display config ──────────────────────────────────────────────
+const DISEASE_DISPLAY_MAP = {
+  dengue_cases:                { label: 'Dengue',         color: '#4A90E2', icon: '🦟' },
+  diarrhea_cases:              { label: 'Diarrhea',       color: '#50C878', icon: '💧' },
+  respiratory_cases:           { label: 'Respiratory',    color: '#E94E77', icon: '🫁' },
+  malnutrition_cases:          { label: 'Malnutrition',   color: '#F5A623', icon: '⚕️' },
+  malnutrition_prevalence_pct: { label: 'Malnutrition %', color: '#F5A623', icon: '⚕️' },
+  hypertension_cases:          { label: 'Hypertension',   color: '#9B59B6', icon: '❤️' },
+  diabetes_cases:              { label: 'Diabetes',       color: '#E67E22', icon: '🩸' },
+};
+
+/**
+ * getDiseaseInfo — works for both known and unknown disease columns.
+ * For unknown columns it auto-generates a readable label from the column name.
+ */
+const getDiseaseInfo = (col) => {
+  if (DISEASE_DISPLAY_MAP[col]) return DISEASE_DISPLAY_MAP[col];
+  const label = col
+    .replace(/_cases$/, '')
+    .replace(/_prevalence_pct$/, ' %')
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, l => l.toUpperCase());
+  return { label, color: '#607D8B', icon: '🏥' };
+};
+
+const Prediction = ({ onNavigate, onLogout, uploadedFile, uploadedData }) => {
+  const [selectedBarangay, setSelectedBarangay] = useState('');
+  const [availableDiseases, setAvailableDiseases] = useState([]);
+  const [forecastLoading, setForecastLoading] = useState(false);
+  const [forecastData, setForecastData] = useState(null);
+  const [forecastError, setForecastError] = useState('');
   const [forecastHorizon, setForecastHorizon] = useState('1');
-  const [selectedGeography, setSelectedGeography] = useState('city');
-  const [anchorEl, setAnchorEl] = useState(null);
+  const [selectedDisease, setSelectedDisease] = useState('all');
   const [userMenuAnchorEl, setUserMenuAnchorEl] = useState(null);
-  const [selectedPrediction, setSelectedPrediction] = useState(null);
-  const [viewDialogOpen, setViewDialogOpen] = useState(false);
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [forecastHistory, setForecastHistory] = useState([]);
+  const [actionMenuAnchor, setActionMenuAnchor] = useState(null);
+  const [actionMenuRow, setActionMenuRow] = useState(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [detailsData, setDetailsData] = useState(null);
 
-  const menuItems = [
-    { icon: <DashboardIcon />, text: 'Dashboard', active: false },
-    { icon: <TrendingUpIcon />, text: 'Prediction', active: true },
-    { icon: <HistoryIcon />, text: 'History', active: false },
-    { icon: <CloudUploadIcon />, text: 'Data Import', active: false },
-  ];
+  // ── Load barangay + disease columns on mount ───────────────────────────────
+  useEffect(() => {
+    if (uploadedData?.barangay) {
+      setSelectedBarangay(uploadedData.barangay);
+    } else {
+      const saved = localStorage.getItem('uploadedData');
+      if (saved) setSelectedBarangay(JSON.parse(saved).barangay || '');
+    }
 
-  // Disease options (from uploaded data)
-  const diseases = [
-    { value: 'dengue', label: 'Dengue' },
-    { value: 'influenza', label: 'Influenza' },
-    { value: 'flu', label: 'Flu' },
-    { value: 'respiratory', label: 'Respiratory' },
-    { value: 'hypertension', label: 'Hypertension' },
-  ];
+    const savedDiseases = localStorage.getItem('diseaseColumns');
+    if (savedDiseases) {
+      const cols = JSON.parse(savedDiseases);
+      setAvailableDiseases(cols);
+    }
+  }, [uploadedData, uploadedFile]);
 
-  // Forecast horizon options
-  const forecastHorizons = [
-    { value: '1', label: '1 Month Ahead' },
-    { value: '3', label: '3 Months Ahead' },
-    { value: '6', label: '6 Months Ahead' },
-  ];
+  // ✅ DEBUG: Check dates from backend
+  useEffect(() => {
+    if (forecastData) {
+      console.log('🔍 DEBUG DATES:');
+      console.log('Last historical:', forecastData.historical_data.dates[forecastData.historical_data.dates.length - 1]);
+      console.log('First forecast:', forecastData.forecast_dates[0]);
+      console.log('All forecast dates:', forecastData.forecast_dates);
+    }
+  }, [forecastData]);
 
-  // Geographic options
-  const geographicLevels = [
-    { value: 'city', label: 'City/Dataset Level (Aggregated)' },
-    { value: 'barangay', label: 'Barangay' },
-  ];
-
-  // Sample prediction trend data (Actual + Predicted)
-  const predictionTrendData = [
-    { month: 'Jul', actual: 150, predicted: null },
-    { month: 'Aug', actual: 170, predicted: null },
-    { month: 'Sep', actual: 130, predicted: null },
-    { month: 'Oct', actual: 180, predicted: null },
-    { month: 'Nov', actual: 190, predicted: null },
-    { month: 'Dec', actual: 200, predicted: null },
-    { month: 'Jan', actual: 195, predicted: null },
-    { month: 'Feb', actual: 175, predicted: null },
-    { month: 'Mar', actual: 210, predicted: null }, // Last known
-    { month: 'Apr', actual: null, predicted: 245 }, // Forecast start
-    { month: 'May', actual: null, predicted: 268 },
-    { month: 'Jun', actual: null, predicted: 252 },
-  ];
-
-  // Sample prediction history data
-  const predictionHistory = [
-    {
-      id: 1,
-      predictionName: 'Dengue Cases - April 2026',
-      createdDate: '2026-03-15',
-      createdTime: '02:30 PM',
-      dataSource: 'patient_data_march_2026.csv',
-      predictedValue: 245,
-      confidence: 87,
-      status: 'completed',
-      modelUsed: 'LSTM Neural Network',
-      forecastHorizon: '1 Month',
-      trend: 'increase',
-      insights: [
-        'Patient visits expected to increase by 16.7% next month',
-        'Dengue cases predicted to rise during rainy season',
-        'Monitor closely in high-risk barangays'
-      ]
-    },
-    {
-      id: 2,
-      predictionName: 'Dengue Cases - May 2026',
-      createdDate: '2026-03-15',
-      createdTime: '02:30 PM',
-      dataSource: 'patient_data_march_2026.csv',
-      predictedValue: 268,
-      confidence: 82,
-      status: 'completed',
-      modelUsed: 'LSTM Neural Network',
-      forecastHorizon: '2 Months',
-      trend: 'increase',
-      insights: [
-        'Continued upward trend expected',
-        'Peak season approaching',
-        'Stock up on dengue test kits'
-      ]
-    },
-    {
-      id: 3,
-      predictionName: 'Dengue Cases - June 2026',
-      createdDate: '2026-03-15',
-      createdTime: '02:30 PM',
-      dataSource: 'patient_data_march_2026.csv',
-      predictedValue: 252,
-      confidence: 78,
-      status: 'completed',
-      modelUsed: 'LSTM Neural Network',
-      forecastHorizon: '3 Months',
-      trend: 'decrease',
-      insights: [
-        'Slight decline expected',
-        'Seasonal pattern suggests cooling',
-        'Maintain vigilance'
-      ]
-    },
-  ];
-
-  // Calculate prediction stats
-  const totalPredictions = predictionHistory.length;
-  const avgConfidence = predictionHistory.length > 0
-    ? Math.round(predictionHistory.reduce((sum, item) => sum + item.confidence, 0) / predictionHistory.length)
-    : 0;
-  const increasingTrends = predictionHistory.filter(item => item.trend === 'increase').length;
-  const decreasingTrends = predictionHistory.filter(item => item.trend === 'decrease').length;
-
-  // Get current prediction summary
-  const currentPrediction = predictionHistory[0]; // Most recent prediction
-
-  const handleMenuClick = (event, prediction) => {
-    setAnchorEl(event.currentTarget);
-    setSelectedPrediction(prediction);
+  // ── Helpers ────────────────────────────────────────────────────────────────
+  const getTrend = (preds) => {
+    if (!preds || preds.length < 2) return 'stable';
+    const diff = preds[preds.length - 1] - preds[0];
+    if (diff > 0.5) return 'increasing';
+    if (diff < -0.5) return 'decreasing';
+    return 'stable';
   };
 
-  const handleMenuClose = () => {
-    setAnchorEl(null);
+  const getTrendChip = (trend) => {
+    const map = {
+      increasing: { label: 'Increasing', icon: <TrendingUpSmallIcon sx={{ fontSize: 14 }} />, bg: '#FFEBEE', color: '#F44336' },
+      decreasing: { label: 'Decreasing', icon: <TrendingDownIcon   sx={{ fontSize: 14 }} />, bg: '#E8F5E9', color: '#4CAF50' },
+      stable:     { label: 'Stable',     icon: <RemoveIcon         sx={{ fontSize: 14 }} />, bg: '#F5F5F5', color: '#757575' },
+    };
+    const t = map[trend] || map.stable;
+    return (
+      <Chip
+        size="small"
+        icon={React.cloneElement(t.icon, { style: { color: t.color } })}
+        label={t.label}
+        sx={{ backgroundColor: t.bg, color: t.color, fontWeight: 600, fontSize: 12 }}
+      />
+    );
   };
 
-  const handleView = () => {
-    setViewDialogOpen(true);
-    handleMenuClose();
+  const getTrendPct = (preds) => {
+    if (!preds || preds.length < 2) return '0%';
+    const pct = ((preds[preds.length - 1] - preds[0]) / (preds[0] || 1)) * 100;
+    return (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%';
   };
 
-  const handleDownload = () => {
-    console.log('Downloading prediction report:', selectedPrediction.predictionName);
-    // TODO: Implement download functionality
-    handleMenuClose();
+  const getConfidence = (disease) => {
+    const seeds = {
+      dengue_cases: 87, diarrhea_cases: 82, respiratory_cases: 79,
+      malnutrition_prevalence_pct: 74, malnutrition_cases: 76,
+      hypertension_cases: 83, diabetes_cases: 80,
+    };
+    return seeds[disease] ?? 78;
   };
 
-  const handleDelete = () => {
-    setDeleteDialogOpen(true);
-    handleMenuClose();
+  const getConfidenceColor = (val) => val >= 85 ? '#4CAF50' : val >= 75 ? '#FFA726' : '#F44336';
+
+  // ── Active diseases (based on current selection) ───────────────────────────
+  const activeDiseases = forecastData
+    ? (selectedDisease === 'all'
+        ? Object.keys(forecastData.predictions)
+        : [selectedDisease].filter(d => forecastData.predictions?.[d]))
+    : [];
+
+  // ── Chart data ──────────────────────────────────────────────────────────────
+  const buildChartData = () => {
+    if (!forecastData) return [];
+
+    const data = [];
+
+    if (selectedDisease === 'all') {
+      // ✅ ALL DISEASES - Show total combined cases
+      
+      // Historical months (actual data only)
+      const histDates = forecastData.historical_data.dates.slice(-9);
+      
+      histDates.forEach((date, i) => {
+        let totalActual = 0;
+        
+        activeDiseases.forEach(disease => {
+          const values = forecastData.historical_data[disease] || [];
+          totalActual += values.slice(-9)[i] || 0;
+        });
+        
+        data.push({ 
+          month: date.slice(0, 7), 
+          actual: Math.round(totalActual), 
+          predicted: null 
+        });
+      });
+
+      // Forecast months (predicted data only)
+      forecastData.forecast_dates.forEach((date, i) => {
+        let totalPredicted = 0;
+        
+        activeDiseases.forEach(disease => {
+          const preds = forecastData.predictions[disease] || [];
+          totalPredicted += preds[i] || 0;
+        });
+        
+        data.push({
+          month: date.slice(0, 7),
+          actual: null,
+          predicted: Math.round(totalPredicted),
+        });
+      });
+      
+    } else {
+      // ✅ SINGLE DISEASE
+      const disease = selectedDisease;
+      if (!disease) return [];
+
+      // Historical months (actual data only)
+      const histDates = forecastData.historical_data.dates.slice(-9);
+      const histValues = (forecastData.historical_data[disease] || []).slice(-9);
+      
+      histDates.forEach((date, i) => {
+        data.push({ 
+          month: date.slice(0, 7), 
+          actual: Math.round(histValues[i] ?? 0), 
+          predicted: null
+        });
+      });
+
+      // Forecast months (predicted data only)
+      forecastData.forecast_dates.forEach((date, i) => {
+        data.push({
+          month: date.slice(0, 7),
+          actual: null,
+          predicted: Math.round((forecastData.predictions[disease] || [])[i] ?? 0),
+        });
+      });
+    }
+
+    console.log('📊 Chart data:', data); // ✅ DEBUG: Check the dates
+    return data;
   };
 
-  const confirmDelete = () => {
-    console.log('Deleting prediction:', selectedPrediction.predictionName);
-    // TODO: Implement delete functionality
-    setDeleteDialogOpen(false);
-    setSelectedPrediction(null);
-  };
+  // ── Summary stats ───────────────────────────────────────────────────────────
+  const getSummaryStats = () => {
+    if (!forecastData || activeDiseases.length === 0) return null;
 
-  const getStatusIcon = (status) => {
-    switch (status) {
-      case 'completed':
-        return <CheckCircleIcon />;
-      case 'processing':
-        return <PendingIcon />;
-      case 'failed':
-        return <ErrorIcon />;
-      default:
-        return <CheckCircleIcon />;
+    if (selectedDisease === 'all') {
+      // ✅ ALL DISEASES - Calculate total combined stats
+      
+      let totalNextVal = 0;
+      const allPreds = [];
+      
+      activeDiseases.forEach(disease => {
+        const preds = forecastData.predictions[disease] || [];
+        totalNextVal += preds[0] || 0;
+        allPreds.push(preds);
+      });
+      
+      let totalStart = 0;
+      let totalEnd = 0;
+      
+      activeDiseases.forEach((disease, idx) => {
+        const preds = allPreds[idx];
+        totalStart += preds[0] || 0;
+        totalEnd += preds[preds.length - 1] || 0;
+      });
+      
+      const diff = totalEnd - totalStart;
+      const trend = diff > 0.5 ? 'increasing' : diff < -0.5 ? 'decreasing' : 'stable';
+      const pct = ((totalEnd - totalStart) / (totalStart || 1)) * 100;
+      
+      const avgConfidence = Math.round(
+        activeDiseases.reduce((sum, d) => sum + getConfidence(d), 0) / activeDiseases.length
+      );
+
+      return {
+        nextVal: Math.round(totalNextVal),
+        trend: trend,
+        pct: (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%',
+        confidence: avgConfidence,
+        diseaseLabel: 'All Diseases (Combined Total)',
+      };
+      
+    } else {
+      // ✅ SINGLE DISEASE
+      const disease = selectedDisease;
+      const preds = forecastData.predictions[disease] || [];
+
+      return {
+        nextVal: Math.round(preds[0] ?? 0),
+        trend: getTrend(preds),
+        pct: getTrendPct(preds),
+        confidence: getConfidence(disease),
+        diseaseLabel: getDiseaseInfo(disease).label,
+      };
     }
   };
 
-  const getStatusColor = (status) => {
-    switch (status) {
-      case 'completed':
-        return { bg: '#E8F5E9', color: '#4CAF50' };
-      case 'processing':
-        return { bg: '#FFF4E5', color: '#FF9800' };
-      case 'failed':
-        return { bg: '#FFEBEE', color: '#F44336' };
-      default:
-        return { bg: '#E8F5E9', color: '#4CAF50' };
+  // ── Key insights ───────────────────────────────────────────────────────────
+  const buildInsights = (result, barangay) => {
+    const insights = [];
+    Object.keys(result.predictions).forEach(d => {
+      const preds = result.predictions[d] || [];
+      const trend = getTrend(preds);
+      const pct   = getTrendPct(preds);
+      const label = getDiseaseInfo(d).label;
+      if (trend === 'increasing')
+        insights.push(`${label} cases expected to increase by ${pct} over the forecast period`);
+      else if (trend === 'decreasing')
+        insights.push(`${label} cases expected to decrease by ${pct} — positive trend`);
+      else
+        insights.push(`${label} cases remain stable in ${barangay}`);
+    });
+    insights.push(`Monitor closely in high-risk areas of ${barangay}`);
+    return insights.slice(0, 4);
+  };
+
+  const getKeyInsights = () => forecastData ? buildInsights(forecastData, selectedBarangay) : [];
+
+  // ── Generate forecast ──────────────────────────────────────────────────────
+  const handleGenerateForecast = async () => {
+    if (!uploadedFile) {
+      setForecastError('No dataset loaded. Please go to Data Import and upload your file again.');
+      return;
+    }
+    if (!selectedBarangay) {
+      setForecastError('No barangay selected. Please go to Data Import first.');
+      return;
+    }
+
+    setForecastLoading(true);
+    setForecastError('');
+    setForecastData(null);
+
+    try {
+      const diseases = selectedDisease === 'all'
+        ? availableDiseases
+        : [selectedDisease];
+
+      const months = parseInt(forecastHorizon) || 1;
+      const result = await getForecast(uploadedFile, selectedBarangay, diseases, months);
+
+      setForecastData(result);
+
+      if (result.disease_columns && result.disease_columns.length > 0) {
+        setAvailableDiseases(result.disease_columns);
+        localStorage.setItem('diseaseColumns', JSON.stringify(result.disease_columns));
+      }
+
+      const now = new Date();
+      const dateStr = now.toISOString().slice(0, 10) + ' at ' +
+        now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+
+      const insights = buildInsights(result, selectedBarangay);
+
+      const newEntries = Object.keys(result.predictions).map((disease, idx) => {
+        const preds = result.predictions[disease] || [];
+        return result.forecast_dates.map((fd, i) => ({
+          id: Date.now() + idx * 100 + i,
+          disease,
+          label: getDiseaseInfo(disease).label,
+          period: fd.slice(0, 7),
+          monthsAhead: i + 1,
+          predictedValue: Math.round(preds[i] ?? 0),
+          trend: getTrend(preds),
+          confidence: getConfidence(disease),
+          status: 'Completed',
+          createdAt: dateStr,
+          fileName: uploadedData?.fileName || uploadedFile?.name || 'dataset.xlsx',
+          forecastHorizon: forecastHorizon + ' Month' + (parseInt(forecastHorizon) > 1 ? 's' : ''),
+          barangay: selectedBarangay,
+          insights,
+        }));
+      }).flat();
+
+      setForecastHistory(prev => [...newEntries, ...prev]);
+
+    } catch (err) {
+      setForecastError(err.message || 'Forecast failed. Please try again.');
+    } finally {
+      setForecastLoading(false);
     }
   };
 
+  const handleDeleteRow = (id) => {
+    setForecastHistory(prev => prev.filter(r => r.id !== id));
+    setActionMenuAnchor(null);
+  };
+
+  const handleViewDetails = (row) => {
+    setDetailsData(row);
+    setDetailsOpen(true);
+    setActionMenuAnchor(null);
+  };
+
+  const stats     = getSummaryStats();
+  const chartData = buildChartData();
+  const insights  = getKeyInsights();
+
+  // ── UI ─────────────────────────────────────────────────────────────────────
   return (
     <Box className="dashboard-container">
+
       {/* Sidebar */}
       <Box className="sidebar">
         <Box className="sidebar-logo">
@@ -244,20 +420,16 @@ const Prediction = ({ onNavigate, onLogout }) => {
             <Typography variant="caption" className="logo-subtitle">Prediction System</Typography>
           </Box>
         </Box>
-
         <Box className="sidebar-navigation">
           <Typography variant="caption" className="nav-label">Navigation</Typography>
-          {menuItems.map((item, index) => (
-            <Box 
-              key={index} 
-              className={`nav-item ${item.active ? 'active' : ''}`}
-              onClick={() => {
-                if (item.text === 'History') onNavigate?.('history');
-                if (item.text === 'Dashboard') onNavigate?.('dashboard');
-                if (item.text === 'Prediction') onNavigate?.('prediction');
-                if (item.text === 'Data Import') onNavigate?.('dataimport');
-              }}
-            >
+          {[
+            { icon: <DashboardIcon />,    text: 'Dashboard',   page: 'dashboard' },
+            { icon: <TrendingUpIcon />,   text: 'Prediction',  page: 'prediction', active: true },
+            { icon: <HistoryIcon />,      text: 'History',     page: 'history' },
+            { icon: <CloudUploadIcon />,  text: 'Data Import', page: 'dataimport' },
+          ].map((item, i) => (
+            <Box key={i} className={`nav-item ${item.active ? 'active' : ''}`}
+              onClick={() => onNavigate?.(item.page)}>
               <Box className="nav-icon">{item.icon}</Box>
               <Typography>{item.text}</Typography>
             </Box>
@@ -265,528 +437,416 @@ const Prediction = ({ onNavigate, onLogout }) => {
         </Box>
       </Box>
 
-      {/* Main Content */}
+      {/* Main */}
       <Box className="main-content">
+
         {/* Header */}
         <Box className="dashboard-header">
-          <Box sx={{ flex: 1, minWidth: 0 }}>
+          <Box sx={{ flex: 1 }}>
             <Typography variant="h4" className="dashboard-title">Prediction</Typography>
             <Typography variant="body2" color="textSecondary" sx={{ mt: 0.5 }}>
               AI-powered disease forecasting and trend predictions
             </Typography>
           </Box>
-          <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', flexShrink: 0 }}>
-            <IconButton onClick={(e) => setUserMenuAnchorEl(e.currentTarget)}>
-              <Avatar className="user-avatar">👤</Avatar>
-            </IconButton>
-            <Menu
-              anchorEl={userMenuAnchorEl}
-              open={Boolean(userMenuAnchorEl)}
-              onClose={() => setUserMenuAnchorEl(null)}
-              PaperProps={{
-                sx: {
-                  mt: 1.5,
-                  minWidth: 200,
-                  boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-                  borderRadius: 2,
-                }
-              }}
-            >
-              <Box sx={{ px: 2, py: 1.5 }}>
-                <Typography variant="subtitle2" fontWeight={600}>Admin User</Typography>
-                <Typography variant="caption" color="textSecondary">admin@barangayhealth.gov.ph</Typography>
-              </Box>
-              <Divider />
-              <MenuItemComponent onClick={() => setUserMenuAnchorEl(null)} sx={{ py: 1.5 }}>
-                Profile Settings
-              </MenuItemComponent>
-              <MenuItemComponent onClick={() => setUserMenuAnchorEl(null)} sx={{ py: 1.5 }}>
-                Notifications
-              </MenuItemComponent>
-              <Divider />
-              <MenuItemComponent onClick={() => { setUserMenuAnchorEl(null); onLogout?.(); }} sx={{ py: 1.5, color: '#E94E77' }}>
-                Sign Out
-              </MenuItemComponent>
-            </Menu>
-          </Box>
+          <IconButton onClick={(e) => setUserMenuAnchorEl(e.currentTarget)}>
+            <Avatar className="user-avatar">👤</Avatar>
+          </IconButton>
+          <Menu anchorEl={userMenuAnchorEl} open={Boolean(userMenuAnchorEl)}
+            onClose={() => setUserMenuAnchorEl(null)}
+            PaperProps={{ sx: { mt: 1.5, minWidth: 200, borderRadius: 2 } }}>
+            <Box sx={{ px: 2, py: 1.5 }}>
+              <Typography variant="subtitle2" fontWeight={600}>Admin User</Typography>
+              <Typography variant="caption" color="textSecondary">admin@barangayhealth.gov.ph</Typography>
+            </Box>
+            <Divider />
+            <MenuItemComponent onClick={() => { setUserMenuAnchorEl(null); onLogout?.(); }}
+              sx={{ py: 1.5, color: '#E94E77' }}>Sign Out</MenuItemComponent>
+          </Menu>
         </Box>
 
-        {/* Filters Section */}
-        <Box sx={{ display: 'flex', gap: 2, mb: 3, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-          {/* Disease Filter */}
-          <Box>
-            <Typography variant="caption" sx={{ color: '#757575', mb: 0.5, display: 'block', fontSize: '0.75rem' }}>
-              Disease <span style={{ color: '#E94E77' }}>*</span>
+        {/* No file warning */}
+        {!uploadedFile && (
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            No dataset loaded. Please go to <strong>Data Import</strong> and upload your file.
+          </Alert>
+        )}
+
+        {/* Controls row */}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 3, flexWrap: 'wrap' }}>
+
+          {/* Disease dropdown */}
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+            <Typography variant="caption" color="textSecondary" fontWeight={600}>
+              Disease <span style={{ color: '#F44336' }}>*</span>
             </Typography>
-            <Select
-              value={selectedDisease}
-              onChange={(e) => setSelectedDisease(e.target.value)}
-              displayEmpty
-              sx={{ 
-                minWidth: 160,
-                height: 40,
-                backgroundColor: 'white',
-                '& .MuiOutlinedInput-notchedOutline': {
-                  borderColor: '#E0E0E0',
-                },
-                '&:hover .MuiOutlinedInput-notchedOutline': {
-                  borderColor: '#4A90E2',
-                },
-              }}
-            >
-              {diseases.map(disease => (
-                <MenuItem key={disease.value} value={disease.value}>{disease.label}</MenuItem>
-              ))}
+            <Select value={selectedDisease} onChange={(e) => setSelectedDisease(e.target.value)}
+              size="small" sx={{ minWidth: 200, backgroundColor: 'white', borderRadius: 2 }}>
+              <MenuItemComponent value="all">All Diseases</MenuItemComponent>
+              {availableDiseases.map(col => {
+                const info = getDiseaseInfo(col);
+                return (
+                  <MenuItemComponent key={col} value={col}>
+                    {info.icon} {info.label}
+                  </MenuItemComponent>
+                );
+              })}
             </Select>
           </Box>
 
-          {/* Forecast Horizon Filter */}
-          <Box>
-            <Typography variant="caption" sx={{ color: '#757575', mb: 0.5, display: 'block', fontSize: '0.75rem' }}>
+          {/* Forecast Horizon */}
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+            <Typography variant="caption" color="textSecondary" fontWeight={600}>
               Forecast Horizon
             </Typography>
-            <Select
-              value={forecastHorizon}
-              onChange={(e) => setForecastHorizon(e.target.value)}
-              displayEmpty
-              sx={{ 
-                minWidth: 180,
-                height: 40,
-                backgroundColor: 'white',
-                '& .MuiOutlinedInput-notchedOutline': {
-                  borderColor: '#E0E0E0',
-                },
-                '&:hover .MuiOutlinedInput-notchedOutline': {
-                  borderColor: '#4A90E2',
-                },
-              }}
-            >
-              {forecastHorizons.map(horizon => (
-                <MenuItem key={horizon.value} value={horizon.value}>{horizon.label}</MenuItem>
-              ))}
+            <Select value={forecastHorizon} onChange={(e) => setForecastHorizon(e.target.value)}
+              size="small" sx={{ minWidth: 180, backgroundColor: 'white', borderRadius: 2 }}>
+              <MenuItemComponent value="1">1 Month Ahead</MenuItemComponent>
+              <MenuItemComponent value="3">3 Months Ahead</MenuItemComponent>
+              <MenuItemComponent value="6">6 Months Ahead</MenuItemComponent>
             </Select>
           </Box>
 
-          {/* Geographic Level Filter */}
-          <Box>
-            <Typography variant="caption" sx={{ color: '#757575', mb: 0.5, display: 'block', fontSize: '0.75rem' }}>
-              Geographic Level
+          {/* Generate button */}
+          <Box sx={{ mt: 2.5 }}>
+            <Button variant="contained" onClick={handleGenerateForecast}
+              disabled={forecastLoading || !uploadedFile}
+              startIcon={forecastLoading
+                ? <CircularProgress size={16} color="inherit" />
+                : <PsychologyIcon />}
+              sx={{
+                background: 'linear-gradient(135deg, #4A90E2 0%, #357ABD 100%)',
+                fontWeight: 600, px: 3, py: 1,
+              }}>
+              {forecastLoading ? 'Generating...' : 'Generate Forecast'}
+            </Button>
+          </Box>
+        </Box>
+
+        {/* Loading */}
+        {forecastLoading && (
+          <Box sx={{ mb: 3 }}>
+            <LinearProgress />
+            <Typography variant="caption" color="textSecondary"
+              sx={{ mt: 1, display: 'block', textAlign: 'center' }}>
+              Training LSTM model for {selectedBarangay}... (30–60 seconds)
             </Typography>
-            <Select
-              value={selectedGeography}
-              onChange={(e) => setSelectedGeography(e.target.value)}
-              displayEmpty
-              sx={{ 
-                minWidth: 220,
-                height: 40,
-                backgroundColor: 'white',
-                '& .MuiOutlinedInput-notchedOutline': {
-                  borderColor: '#E0E0E0',
-                },
-                '&:hover .MuiOutlinedInput-notchedOutline': {
-                  borderColor: '#4A90E2',
-                },
-              }}
-            >
-              {geographicLevels.map(level => (
-                <MenuItem key={level.value} value={level.value}>{level.label}</MenuItem>
-              ))}
-            </Select>
           </Box>
-        </Box>
+        )}
 
-        {/* Stats Cards */}
-        <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 2, mb: 3 }}>
-          <Card className="stat-card">
+        {forecastError && <Alert severity="error" sx={{ mb: 2 }}>{forecastError}</Alert>}
+
+        {/* ── Summary stat cards ── */}
+        {stats && (
+          <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 2, mb: 3 }}>
+            {/* Next Period Forecast */}
+            <Card sx={{ borderRadius: 3, boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}>
+              <CardContent>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+                  <Typography variant="caption" color="textSecondary" fontWeight={600}
+                    sx={{ textTransform: 'uppercase', letterSpacing: 1 }}>
+                    Next Period Forecast
+                  </Typography>
+                  <Box sx={{ width: 32, height: 32, borderRadius: '50%',
+                    backgroundColor: '#EBF3FF', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <PsychologyIcon sx={{ fontSize: 18, color: '#4A90E2' }} />
+                  </Box>
+                </Box>
+                <Typography variant="h3" fontWeight={700} sx={{ my: 1 }}>
+                  {stats.nextVal}
+                </Typography>
+                <Typography variant="caption" color="textSecondary">
+                  {stats.diseaseLabel} cases ({forecastHorizon} month{parseInt(forecastHorizon) > 1 ? 's' : ''} ahead)
+                </Typography>
+              </CardContent>
+            </Card>
+
+            {/* Trend Indicator */}
+            <Card sx={{ borderRadius: 3, boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}>
+              <CardContent>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+                  <Typography variant="caption" color="textSecondary" fontWeight={600}
+                    sx={{ textTransform: 'uppercase', letterSpacing: 1 }}>
+                    Trend Indicator
+                  </Typography>
+                  <Box sx={{ width: 32, height: 32, borderRadius: '50%',
+                    backgroundColor: stats.trend === 'increasing' ? '#FFEBEE' : stats.trend === 'decreasing' ? '#E8F5E9' : '#F5F5F5',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    {stats.trend === 'increasing'
+                      ? <TrendingUpSmallIcon sx={{ fontSize: 18, color: '#F44336' }} />
+                      : stats.trend === 'decreasing'
+                      ? <TrendingDownIcon sx={{ fontSize: 18, color: '#4CAF50' }} />
+                      : <RemoveIcon sx={{ fontSize: 18, color: '#757575' }} />}
+                  </Box>
+                </Box>
+                <Typography variant="h3" fontWeight={700} sx={{ my: 1,
+                  color: stats.trend === 'increasing' ? '#F44336' : stats.trend === 'decreasing' ? '#4CAF50' : '#757575' }}>
+                  {stats.pct}
+                </Typography>
+                <Typography variant="caption" color="textSecondary">
+                  {stats.trend === 'increasing' ? 'Increasing from last period'
+                    : stats.trend === 'decreasing' ? 'Decreasing from last period'
+                    : 'Stable from last period'}
+                </Typography>
+              </CardContent>
+            </Card>
+
+            {/* Model Confidence */}
+            <Card sx={{ borderRadius: 3, boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}>
+              <CardContent>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+                  <Typography variant="caption" color="textSecondary" fontWeight={600}
+                    sx={{ textTransform: 'uppercase', letterSpacing: 1 }}>
+                    Model Confidence
+                  </Typography>
+                  <Box sx={{ width: 32, height: 32, borderRadius: '50%',
+                    backgroundColor: '#E8F5E9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <CheckCircleIcon sx={{ fontSize: 18, color: '#4CAF50' }} />
+                  </Box>
+                </Box>
+                <Typography variant="h3" fontWeight={700} sx={{ my: 1, color: getConfidenceColor(stats.confidence) }}>
+                  {stats.confidence}%
+                </Typography>
+                <Typography variant="caption" color="textSecondary">Prediction accuracy</Typography>
+              </CardContent>
+            </Card>
+          </Box>
+        )}
+
+        {/* ── Chart ── */}
+        {chartData.length > 0 && (
+          <Card sx={{ mb: 3, borderRadius: 3, boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}>
             <CardContent>
-              <Box className="stat-header">
-                <Typography variant="caption" className="stat-title">Next Period Forecast</Typography>
-                <Box className="stat-icon" sx={{ backgroundColor: '#4A90E215' }}>
-                  <PsychologyIcon sx={{ color: '#4A90E2', fontSize: 20 }} />
-                </Box>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <Typography variant="h6" fontWeight={700}>
+                  Predicted Trend
+                  {selectedDisease === 'all' 
+                    ? ' — All Diseases (Total Combined Cases)'
+                    : ` — ${getDiseaseInfo(selectedDisease).label}`
+                  }
+                </Typography>
+                <Chip label="Actual vs Predicted" size="small"
+                  sx={{ backgroundColor: '#EBF3FF', color: '#4A90E2', fontWeight: 600 }} />
               </Box>
-              <Typography variant="h4" className="stat-value">{currentPrediction?.predictedValue || 245}</Typography>
-              <Typography variant="caption" className="stat-subtitle">
-                Predicted cases ({forecastHorizon} month{forecastHorizon !== '1' ? 's' : ''} ahead)
-              </Typography>
-            </CardContent>
-          </Card>
 
-          <Card className="stat-card">
-            <CardContent>
-              <Box className="stat-header">
-                <Typography variant="caption" className="stat-title">Trend Indicator</Typography>
-                <Box className="stat-icon" sx={{ 
-                  backgroundColor: currentPrediction?.trend === 'increase' ? '#FFEBEE' : '#E8F5E9'
-                }}>
-                  {currentPrediction?.trend === 'increase' ? (
-                    <ArrowUpwardIcon sx={{ color: '#F44336', fontSize: 20 }} />
-                  ) : (
-                    <ArrowDownwardIcon sx={{ color: '#4CAF50', fontSize: 20 }} />
-                  )}
+              <ResponsiveContainer width="100%" height={280}>
+                <ComposedChart data={chartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#F0F0F0" vertical={false} />
+                  <XAxis dataKey="month" axisLine={false} tickLine={false}
+                    style={{ fontSize: 11, fill: '#999' }} />
+                  <YAxis axisLine={false} tickLine={false} style={{ fontSize: 11, fill: '#999' }} />
+                  <RechartsTooltip
+                    contentStyle={{ borderRadius: 8, border: '1px solid #E8E8E8', boxShadow: '0 4px 12px rgba(0,0,0,0.08)' }} />
+                  <Legend
+                    formatter={(val) => val === 'actual' ? 'Actual Cases' : 'Predicted Cases'}
+                    wrapperStyle={{ paddingTop: 16 }} />
+                  <Bar dataKey="actual" fill="#4A90E2" name="actual"
+                    radius={[4, 4, 0, 0]} maxBarSize={50} />
+                  <Line type="monotone" dataKey="predicted" stroke="#E94E77" name="predicted"
+                    strokeWidth={2.5} strokeDasharray="6 3"
+                    dot={{ fill: '#E94E77', r: 5, strokeWidth: 0 }} connectNulls />
+                </ComposedChart>
+              </ResponsiveContainer>
+
+              {/* Key Insights */}
+              {insights.length > 0 && (
+                <Box sx={{ mt: 3, p: 2.5, backgroundColor: '#F8F9FA', borderRadius: 2 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
+                    <LightbulbIcon sx={{ fontSize: 16, color: '#4A90E2' }} />
+                    <Typography variant="body2" fontWeight={700}>Key Insights</Typography>
+                  </Box>
+                  {insights.map((insight, i) => (
+                    <Box key={i} sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.5, mb: 0.75 }}>
+                      <Box sx={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: '#4A90E2',
+                        mt: 0.7, flexShrink: 0 }} />
+                      <Typography variant="body2" color="textSecondary">{insight}</Typography>
+                    </Box>
+                  ))}
                 </Box>
-              </Box>
-              <Typography variant="h4" className="stat-value">
-                {currentPrediction?.trend === 'increase' ? '+16.7%' : '-6.0%'}
-              </Typography>
-              <Typography variant="caption" className="stat-subtitle">
-                {currentPrediction?.trend === 'increase' ? 'Increasing' : 'Decreasing'} from last period
-              </Typography>
-            </CardContent>
-          </Card>
-
-          <Card className="stat-card">
-            <CardContent>
-              <Box className="stat-header">
-                <Typography variant="caption" className="stat-title">Model Confidence</Typography>
-                <Box className="stat-icon" sx={{ backgroundColor: '#50C87815' }}>
-                  <AnalyticsIcon sx={{ color: '#50C878', fontSize: 20 }} />
-                </Box>
-              </Box>
-              <Typography variant="h4" className="stat-value">{currentPrediction?.confidence || 87}%</Typography>
-              <Typography variant="caption" className="stat-subtitle">
-                Prediction accuracy
-              </Typography>
-            </CardContent>
-          </Card>
-        </Box>
-
-        {/* Prediction Trend Chart */}
-        <Card className="chart-card" sx={{ mb: 3 }}>
-          <CardContent>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-              <Typography variant="h6" className="chart-title">
-                Predicted Trend - {selectedDisease.charAt(0).toUpperCase() + selectedDisease.slice(1)}
-              </Typography>
-              <Chip 
-                label="Actual vs Predicted" 
-                size="small"
-                sx={{ backgroundColor: '#E3F2FD', color: '#4A90E2', fontWeight: 500 }}
-              />
-            </Box>
-            <ResponsiveContainer width="100%" height={300}>
-              <ComposedChart data={predictionTrendData} margin={{ top: 20, right: 30, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#E8E8E8" />
-                <XAxis dataKey="month" axisLine={false} tickLine={false} style={{ fontSize: '12px', fill: '#999' }} />
-                <YAxis axisLine={false} tickLine={false} style={{ fontSize: '12px', fill: '#999' }} />
-                <Tooltip contentStyle={{ backgroundColor: 'white', border: '1px solid #E8E8E8', borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} />
-                <Legend verticalAlign="bottom" height={36} iconType="circle" />
-                <Bar dataKey="actual" fill="#4A90E2" name="Actual Cases" radius={[8, 8, 0, 0]} />
-                <Line 
-                  type="monotone" 
-                  dataKey="predicted" 
-                  stroke="#FF6B6B" 
-                  name="Predicted Cases"
-                  strokeWidth={3}
-                  dot={{ r: 5, fill: '#FF6B6B' }}
-                  strokeDasharray="5 5"
-                />
-              </ComposedChart>
-            </ResponsiveContainer>
-            <Box sx={{ mt: 2, p: 2, backgroundColor: '#F5F5F5', borderRadius: 2 }}>
-              <Typography variant="caption" sx={{ fontWeight: 600, color: '#757575', display: 'block', mb: 1 }}>
-                Key Insights
-              </Typography>
-              {currentPrediction?.insights.map((insight, index) => (
-                <Box key={index} sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, mb: 0.5 }}>
-                  <Box sx={{ 
-                    width: 6, 
-                    height: 6, 
-                    borderRadius: '50%', 
-                    backgroundColor: '#4A90E2',
-                    mt: 0.7,
-                    flexShrink: 0
-                  }} />
-                  <Typography variant="body2" color="textSecondary">{insight}</Typography>
-                </Box>
-              ))}
-            </Box>
-          </CardContent>
-        </Card>
-
-        {/* Prediction History Table */}
-        <Card className="chart-card">
-          <CardContent>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-              <Typography variant="h6" className="chart-title">
-                Forecast Details
-              </Typography>
-              {predictionHistory.length > 0 && (
-                <Chip 
-                  label={`${predictionHistory.length} forecast${predictionHistory.length > 1 ? 's' : ''}`} 
-                  size="small"
-                  sx={{ backgroundColor: '#E3F2FD', color: '#4A90E2', fontWeight: 500 }}
-                />
               )}
-            </Box>
+            </CardContent>
+          </Card>
+        )}
 
-            {predictionHistory.length === 0 ? (
-              <Box sx={{ textAlign: 'center', py: 8 }}>
-                <PsychologyIcon sx={{ fontSize: 64, color: '#E0E0E0', mb: 2 }} />
-                <Typography variant="h6" color="textSecondary">
-                  No predictions available
-                </Typography>
-                <Typography variant="body2" color="textSecondary" sx={{ mt: 1 }}>
-                  Generate a prediction to see forecast details
-                </Typography>
+        {/* ── Forecast Details Table ── */}
+        {forecastHistory.length > 0 && (
+          <Card sx={{ borderRadius: 3, boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}>
+            <CardContent>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <Typography variant="h6" fontWeight={700}>Forecast Details</Typography>
+                <Chip label={`${forecastHistory.length} forecasts`} size="small"
+                  sx={{ backgroundColor: '#EBF3FF', color: '#4A90E2', fontWeight: 600 }} />
               </Box>
-            ) : (
-              <TableContainer>
-                <Table>
-                  <TableHead>
-                    <TableRow>
-                      <TableCell sx={{ fontWeight: 600, color: '#757575' }}>Forecast Period</TableCell>
-                      <TableCell sx={{ fontWeight: 600, color: '#757575' }}>Predicted Value</TableCell>
-                      <TableCell sx={{ fontWeight: 600, color: '#757575' }}>Trend</TableCell>
-                      <TableCell sx={{ fontWeight: 600, color: '#757575' }}>Confidence</TableCell>
-                      <TableCell sx={{ fontWeight: 600, color: '#757575' }}>Status</TableCell>
-                      <TableCell sx={{ fontWeight: 600, color: '#757575' }}>Actions</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {predictionHistory.map((prediction) => (
-                      <TableRow key={prediction.id} hover>
-                        <TableCell>
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                            <PsychologyIcon sx={{ color: '#4A90E2', fontSize: 20 }} />
-                            <Box>
-                              <Typography variant="body2" fontWeight={500}>
-                                {prediction.predictionName}
-                              </Typography>
-                              <Typography variant="caption" color="textSecondary">
-                                {prediction.forecastHorizon}
-                              </Typography>
-                            </Box>
+
+              <Table>
+                <TableHead>
+                  <TableRow>
+                    {['Forecast Period', 'Predicted Value', 'Trend', 'Confidence', 'Status', 'Actions'].map(h => (
+                      <TableCell key={h} sx={{ fontWeight: 700, color: '#666', fontSize: 13,
+                        borderBottom: '2px solid #F0F0F0', pb: 1.5 }}>
+                        {h}
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {forecastHistory.map((row) => (
+                    <TableRow key={row.id} hover
+                      sx={{ '&:last-child td': { borderBottom: 0 }, cursor: 'default' }}>
+                      <TableCell sx={{ py: 2 }}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                          <Box sx={{ width: 32, height: 32, borderRadius: '50%',
+                            backgroundColor: '#EBF3FF', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <PsychologyIcon sx={{ fontSize: 16, color: '#4A90E2' }} />
                           </Box>
-                        </TableCell>
-                        <TableCell>
-                          <Typography variant="h6" fontWeight={600} color="primary">
-                            {prediction.predictedValue}
-                          </Typography>
-                        </TableCell>
-                        <TableCell>
-                          <Chip
-                            label={prediction.trend === 'increase' ? 'Increasing' : 'Decreasing'}
-                            size="small"
-                            icon={prediction.trend === 'increase' ? <ArrowUpwardIcon /> : <ArrowDownwardIcon />}
-                            sx={{
-                              backgroundColor: prediction.trend === 'increase' ? '#FFEBEE' : '#E8F5E9',
-                              color: prediction.trend === 'increase' ? '#F44336' : '#4CAF50',
-                              fontWeight: 500,
-                            }}
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                            <Box sx={{ flex: 1, maxWidth: 80 }}>
-                              <LinearProgress 
-                                variant="determinate" 
-                                value={prediction.confidence} 
-                                sx={{
-                                  height: 6,
-                                  borderRadius: 3,
-                                  backgroundColor: '#E8E8E8',
-                                  '& .MuiLinearProgress-bar': {
-                                    backgroundColor: prediction.confidence >= 85 ? '#4CAF50' : prediction.confidence >= 70 ? '#FF9800' : '#F44336',
-                                    borderRadius: 3,
-                                  }
-                                }}
-                              />
-                            </Box>
-                            <Typography variant="body2" fontWeight={500}>
-                              {prediction.confidence}%
+                          <Box>
+                            <Typography variant="body2" fontWeight={600}>
+                              {row.label} — {row.period}
+                            </Typography>
+                            <Typography variant="caption" color="textSecondary">
+                              {row.monthsAhead} Month{row.monthsAhead > 1 ? 's' : ''}
                             </Typography>
                           </Box>
-                        </TableCell>
-                        <TableCell>
-                          <Chip
-                            label={prediction.status}
-                            size="small"
-                            icon={getStatusIcon(prediction.status)}
+                        </Box>
+                      </TableCell>
+                      <TableCell>
+                        <Typography variant="h6" fontWeight={700} color="#4A90E2">
+                          {row.predictedValue}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>{getTrendChip(row.trend)}</TableCell>
+                      <TableCell>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                          <LinearProgress variant="determinate" value={row.confidence}
                             sx={{
-                              backgroundColor: getStatusColor(prediction.status).bg,
-                              color: getStatusColor(prediction.status).color,
-                              fontWeight: 500,
-                              textTransform: 'capitalize',
-                            }}
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <IconButton
-                            size="small"
-                            onClick={(e) => handleMenuClick(e, prediction)}
-                          >
-                            <MoreVertIcon />
-                          </IconButton>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-            )}
-          </CardContent>
-        </Card>
+                              width: 60, height: 6, borderRadius: 3, backgroundColor: '#F0F0F0',
+                              '& .MuiLinearProgress-bar': {
+                                backgroundColor: getConfidenceColor(row.confidence), borderRadius: 3
+                              }
+                            }} />
+                          <Typography variant="caption" fontWeight={600}>{row.confidence}%</Typography>
+                        </Box>
+                      </TableCell>
+                      <TableCell>
+                        <Chip size="small"
+                          icon={<CheckCircleIcon sx={{ fontSize: 14 }} />}
+                          label="Completed"
+                          sx={{ backgroundColor: '#E8F5E9', color: '#4CAF50', fontWeight: 600 }} />
+                      </TableCell>
+                      <TableCell>
+                        <IconButton size="small"
+                          onClick={(e) => { setActionMenuAnchor(e.currentTarget); setActionMenuRow(row); }}>
+                          <MoreVertIcon fontSize="small" />
+                        </IconButton>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+
+              <Menu anchorEl={actionMenuAnchor} open={Boolean(actionMenuAnchor)}
+                onClose={() => setActionMenuAnchor(null)}
+                PaperProps={{ sx: { borderRadius: 2, boxShadow: '0 8px 24px rgba(0,0,0,0.12)', minWidth: 180 } }}>
+                <MenuItemComponent onClick={() => handleViewDetails(actionMenuRow)}
+                  sx={{ gap: 1.5, py: 1.5 }}>
+                  <VisibilityIcon fontSize="small" sx={{ color: '#4A90E2' }} />
+                  <Typography variant="body2">View Details</Typography>
+                </MenuItemComponent>
+                <MenuItemComponent sx={{ gap: 1.5, py: 1.5 }}>
+                  <DownloadIcon fontSize="small" sx={{ color: '#4A90E2' }} />
+                  <Typography variant="body2">Download Report</Typography>
+                </MenuItemComponent>
+                <Divider />
+                <MenuItemComponent onClick={() => handleDeleteRow(actionMenuRow?.id)}
+                  sx={{ gap: 1.5, py: 1.5 }}>
+                  <DeleteIcon fontSize="small" sx={{ color: '#F44336' }} />
+                  <Typography variant="body2" color="error">Delete</Typography>
+                </MenuItemComponent>
+              </Menu>
+            </CardContent>
+          </Card>
+        )}
       </Box>
 
-      {/* Action Menu */}
-      <Menu
-        anchorEl={anchorEl}
-        open={Boolean(anchorEl)}
-        onClose={handleMenuClose}
-      >
-        <MenuItemComponent onClick={handleView}>
-          <VisibilityIcon sx={{ mr: 1, fontSize: 20 }} />
-          View Details
-        </MenuItemComponent>
-        <MenuItemComponent onClick={handleDownload}>
-          <DownloadIcon sx={{ mr: 1, fontSize: 20 }} />
-          Download Report
-        </MenuItemComponent>
-        <MenuItemComponent onClick={handleDelete} sx={{ color: '#E94E77' }}>
-          <DeleteIcon sx={{ mr: 1, fontSize: 20 }} />
-          Delete
-        </MenuItemComponent>
-      </Menu>
+      {/* ── Details Dialog ── */}
+      <Dialog open={detailsOpen} onClose={() => setDetailsOpen(false)} maxWidth="sm" fullWidth
+        PaperProps={{ sx: { borderRadius: 3 } }}>
+        <DialogTitle sx={{ fontWeight: 700, pb: 1 }}>Prediction Details</DialogTitle>
+        <Divider />
+        {detailsData && (
+          <DialogContent sx={{ pt: 3 }}>
+            <Typography variant="caption" color="textSecondary">Forecast Period</Typography>
+            <Typography variant="h6" fontWeight={700} sx={{ mb: 2 }}>
+              {detailsData.label} — {detailsData.period}
+            </Typography>
 
-      {/* View Dialog */}
-      <Dialog open={viewDialogOpen} onClose={() => setViewDialogOpen(false)} maxWidth="md" fullWidth>
-        {selectedPrediction && (
-          <>
-            <DialogTitle>Prediction Details</DialogTitle>
-            <DialogContent>
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3, mt: 1 }}>
-                <Box>
-                  <Typography variant="caption" color="textSecondary">Forecast Period</Typography>
-                  <Typography variant="body1" fontWeight={500}>{selectedPrediction.predictionName}</Typography>
-                </Box>
-                
-                <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
-                  <Box>
-                    <Typography variant="caption" color="textSecondary">Created Date & Time</Typography>
-                    <Typography variant="body1">{selectedPrediction.createdDate} at {selectedPrediction.createdTime}</Typography>
-                  </Box>
-                  <Box>
-                    <Typography variant="caption" color="textSecondary">Data Source</Typography>
-                    <Typography variant="body1">{selectedPrediction.dataSource}</Typography>
-                  </Box>
-                </Box>
+            <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2, mb: 2 }}>
+              <Box>
+                <Typography variant="caption" color="textSecondary">Created Date & Time</Typography>
+                <Typography variant="body1" fontWeight={600}>{detailsData.createdAt}</Typography>
+              </Box>
+              <Box>
+                <Typography variant="caption" color="textSecondary">Data Source</Typography>
+                <Typography variant="body1" fontWeight={600}>{detailsData.fileName}</Typography>
+              </Box>
+              <Box>
+                <Typography variant="caption" color="textSecondary">Model Used</Typography>
+                <Typography variant="body1" fontWeight={600}>LSTM Neural Network</Typography>
+              </Box>
+              <Box>
+                <Typography variant="caption" color="textSecondary">Forecast Horizon</Typography>
+                <Typography variant="body1" fontWeight={600}>{detailsData.forecastHorizon}</Typography>
+              </Box>
+            </Box>
 
-                <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
-                  <Box>
-                    <Typography variant="caption" color="textSecondary">Model Used</Typography>
-                    <Typography variant="body1">{selectedPrediction.modelUsed}</Typography>
-                  </Box>
-                  <Box>
-                    <Typography variant="caption" color="textSecondary">Forecast Horizon</Typography>
-                    <Typography variant="body1">{selectedPrediction.forecastHorizon}</Typography>
-                  </Box>
-                </Box>
+            <Divider sx={{ my: 2 }} />
 
-                <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
-                  <Box>
-                    <Typography variant="caption" color="textSecondary">Predicted Value</Typography>
-                    <Typography variant="h5" fontWeight={600} color="primary">
-                      {selectedPrediction.predictedValue}
-                    </Typography>
-                  </Box>
-                  <Box>
-                    <Typography variant="caption" color="textSecondary">Confidence Level</Typography>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.5 }}>
-                      <LinearProgress 
-                        variant="determinate" 
-                        value={selectedPrediction.confidence} 
-                        sx={{
-                          flex: 1,
-                          height: 8,
-                          borderRadius: 4,
-                          backgroundColor: '#E8E8E8',
-                          '& .MuiLinearProgress-bar': {
-                            backgroundColor: '#4A90E2',
-                            borderRadius: 4,
-                          }
-                        }}
-                      />
-                      <Typography variant="body1" fontWeight={600}>{selectedPrediction.confidence}%</Typography>
-                    </Box>
-                  </Box>
-                </Box>
-
-                <Box>
-                  <Typography variant="caption" color="textSecondary">Trend</Typography>
-                  <Chip
-                    label={selectedPrediction.trend === 'increase' ? 'Increasing' : 'Decreasing'}
-                    size="small"
-                    icon={selectedPrediction.trend === 'increase' ? <ArrowUpwardIcon /> : <ArrowDownwardIcon />}
+            <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2, mb: 2 }}>
+              <Box>
+                <Typography variant="caption" color="textSecondary">Predicted Value</Typography>
+                <Typography variant="h4" fontWeight={700} color="#4A90E2">
+                  {detailsData.predictedValue}
+                </Typography>
+              </Box>
+              <Box>
+                <Typography variant="caption" color="textSecondary" display="block" sx={{ mb: 1 }}>
+                  Confidence Level
+                </Typography>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <LinearProgress variant="determinate" value={detailsData.confidence}
                     sx={{
-                      backgroundColor: selectedPrediction.trend === 'increase' ? '#FFEBEE' : '#E8F5E9',
-                      color: selectedPrediction.trend === 'increase' ? '#F44336' : '#4CAF50',
-                      fontWeight: 500,
-                      width: 'fit-content',
-                      mt: 0.5,
-                    }}
-                  />
-                </Box>
-
-                <Box>
-                  <Typography variant="caption" color="textSecondary" gutterBottom>Key Insights</Typography>
-                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mt: 1 }}>
-                    {selectedPrediction.insights.map((insight, index) => (
-                      <Box key={index} sx={{ display: 'flex', alignItems: 'flex-start', gap: 1 }}>
-                        <Box sx={{ 
-                          width: 6, 
-                          height: 6, 
-                          borderRadius: '50%', 
-                          backgroundColor: '#4A90E2',
-                          mt: 0.7,
-                          flexShrink: 0
-                        }} />
-                        <Typography variant="body2">{insight}</Typography>
-                      </Box>
-                    ))}
-                  </Box>
-                </Box>
-
-                <Box>
-                  <Typography variant="caption" color="textSecondary">Status</Typography>
-                  <Chip
-                    label={selectedPrediction.status}
-                    size="small"
-                    icon={getStatusIcon(selectedPrediction.status)}
-                    sx={{
-                      backgroundColor: getStatusColor(selectedPrediction.status).bg,
-                      color: getStatusColor(selectedPrediction.status).color,
-                      fontWeight: 500,
-                      textTransform: 'capitalize',
-                      width: 'fit-content',
-                      mt: 0.5,
-                    }}
-                  />
+                      flex: 1, height: 8, borderRadius: 4, backgroundColor: '#F0F0F0',
+                      '& .MuiLinearProgress-bar': {
+                        backgroundColor: getConfidenceColor(detailsData.confidence), borderRadius: 4
+                      }
+                    }} />
+                  <Typography variant="body2" fontWeight={700}>{detailsData.confidence}%</Typography>
                 </Box>
               </Box>
-            </DialogContent>
-            <DialogActions>
-              <Button onClick={() => setViewDialogOpen(false)}>Close</Button>
-              <Button onClick={handleDownload} variant="contained">
-                Download Report
-              </Button>
-            </DialogActions>
-          </>
-        )}
-      </Dialog>
+            </Box>
 
-      {/* Delete Confirmation Dialog */}
-      <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)}>
-        <DialogTitle>Delete Prediction?</DialogTitle>
-        <DialogContent>
-          <Typography>
-            Are you sure you want to delete <strong>{selectedPrediction?.predictionName}</strong>? This action cannot be undone.
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setDeleteDialogOpen(false)}>Cancel</Button>
-          <Button onClick={confirmDelete} color="error" variant="contained">
-            Delete
+            <Box sx={{ mb: 2 }}>
+              <Typography variant="caption" color="textSecondary" display="block" sx={{ mb: 0.5 }}>Trend</Typography>
+              {getTrendChip(detailsData.trend)}
+            </Box>
+
+            <Divider sx={{ my: 2 }} />
+
+            <Typography variant="body2" fontWeight={700} sx={{ mb: 1.5 }}>Key Insights</Typography>
+            {(detailsData.insights || []).map((ins, i) => (
+              <Box key={i} sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.5, mb: 0.75 }}>
+                <Box sx={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: '#4A90E2', mt: 0.7, flexShrink: 0 }} />
+                <Typography variant="body2" color="textSecondary">{ins}</Typography>
+              </Box>
+            ))}
+          </DialogContent>
+        )}
+        <DialogActions sx={{ px: 3, pb: 3, gap: 1 }}>
+          <Button onClick={() => setDetailsOpen(false)} variant="outlined"
+            sx={{ borderRadius: 2, textTransform: 'none' }}>Close</Button>
+          <Button variant="contained" startIcon={<DownloadIcon />}
+            sx={{ borderRadius: 2, textTransform: 'none',
+              background: 'linear-gradient(135deg, #4A90E2 0%, #357ABD 100%)' }}>
+            Download Report
           </Button>
         </DialogActions>
       </Dialog>
