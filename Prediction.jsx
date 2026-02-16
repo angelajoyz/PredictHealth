@@ -313,14 +313,15 @@ const Prediction = ({ onNavigate, onLogout, uploadedFile, uploadedData }) => {
       const pct   = getTrendPct(preds);
       const label = getDiseaseInfo(d).label;
       if (trend === 'increasing')
-        insights.push(`${label} cases expected to increase by ${pct} over the forecast period`);
+        insights.push({ text: `${label} cases expected to increase by ${pct} over the forecast period`, type: 'warning' });
       else if (trend === 'decreasing')
-        insights.push(`${label} cases expected to decrease by ${pct} — positive trend`);
+        insights.push({ text: `${label} cases expected to decrease by ${pct} — positive trend`, type: 'positive' });
       else
-        insights.push(`${label} cases remain stable in ${barangay}`);
+        insights.push({ text: `${label} cases remain stable in ${barangay}`, type: 'neutral' });
     });
-    insights.push(`Monitor closely in high-risk areas of ${barangay}`);
-    return insights.slice(0, 4);
+    // ✅ No slice — show ALL diseases, plus monitor note
+    insights.push({ text: `Monitor closely in high-risk areas of ${barangay}`, type: 'info' });
+    return insights;
   };
 
   const getKeyInsights = () => forecastData ? buildInsights(forecastData, selectedBarangay) : [];
@@ -647,124 +648,53 @@ const Prediction = ({ onNavigate, onLogout, uploadedFile, uploadedData }) => {
                 </ComposedChart>
               </ResponsiveContainer>
 
-              {/* Key Insights */}
+              {/* ── Key Insights ── ONLY THIS SECTION CHANGED ── */}
               {insights.length > 0 && (
                 <Box sx={{ mt: 3, p: 2.5, backgroundColor: '#F8F9FA', borderRadius: 2 }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
                     <LightbulbIcon sx={{ fontSize: 16, color: '#4A90E2' }} />
                     <Typography variant="body2" fontWeight={700}>Key Insights</Typography>
+                    <Chip
+                      label={`${insights.length - 1} diseases`}
+                      size="small"
+                      sx={{ ml: 'auto', backgroundColor: '#EBF3FF', color: '#4A90E2', fontWeight: 600, fontSize: 11 }}
+                    />
                   </Box>
-                  {insights.map((insight, i) => (
-                    <Box key={i} sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.5, mb: 0.75 }}>
-                      <Box sx={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: '#4A90E2',
-                        mt: 0.7, flexShrink: 0 }} />
-                      <Typography variant="body2" color="textSecondary">{insight}</Typography>
-                    </Box>
-                  ))}
+                  {insights.map((insight, i) => {
+                    const dotColor = insight.type === 'warning'  ? '#F44336'
+                      : insight.type === 'positive' ? '#4CAF50'
+                      : insight.type === 'info'     ? '#4A90E2'
+                      : '#9E9E9E';
+                    return (
+                      <Box key={i} sx={{
+                        display: 'flex', alignItems: 'flex-start', gap: 1.5, mb: 1,
+                        p: 1.5, borderRadius: 1.5,
+                        backgroundColor: insight.type === 'warning'  ? '#FFF5F5'
+                          : insight.type === 'positive' ? '#F1FFF5'
+                          : insight.type === 'info'     ? '#EBF3FF'
+                          : 'transparent',
+                        border: `1px solid ${
+                          insight.type === 'warning'  ? '#FFCDD2'
+                          : insight.type === 'positive' ? '#C8E6C9'
+                          : insight.type === 'info'     ? '#BBDEFB'
+                          : 'transparent'
+                        }`,
+                      }}>
+                        <Box sx={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: dotColor, mt: 0.6, flexShrink: 0 }} />
+                        <Typography variant="body2" sx={{ color: '#444', lineHeight: 1.5 }}>
+                          {insight.text}
+                        </Typography>
+                      </Box>
+                    );
+                  })}
                 </Box>
               )}
             </CardContent>
           </Card>
         )}
 
-        {/* ── Forecast Details Table ── */}
-        {forecastHistory.length > 0 && (
-          <Card sx={{ borderRadius: 3, boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}>
-            <CardContent>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                <Typography variant="h6" fontWeight={700}>Forecast Details</Typography>
-                <Chip label={`${forecastHistory.length} forecasts`} size="small"
-                  sx={{ backgroundColor: '#EBF3FF', color: '#4A90E2', fontWeight: 600 }} />
-              </Box>
+        {/* ── Forecast Details Table ── REMOVED as requested ── */}
 
-              <Table>
-                <TableHead>
-                  <TableRow>
-                    {['Forecast Period', 'Predicted Value', 'Trend', 'Confidence', 'Status', 'Actions'].map(h => (
-                      <TableCell key={h} sx={{ fontWeight: 700, color: '#666', fontSize: 13,
-                        borderBottom: '2px solid #F0F0F0', pb: 1.5 }}>
-                        {h}
-                      </TableCell>
-                    ))}
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {forecastHistory.map((row) => (
-                    <TableRow key={row.id} hover
-                      sx={{ '&:last-child td': { borderBottom: 0 }, cursor: 'default' }}>
-                      <TableCell sx={{ py: 2 }}>
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-                          <Box sx={{ width: 32, height: 32, borderRadius: '50%',
-                            backgroundColor: '#EBF3FF', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                            <PsychologyIcon sx={{ fontSize: 16, color: '#4A90E2' }} />
-                          </Box>
-                          <Box>
-                            <Typography variant="body2" fontWeight={600}>
-                              {row.label} — {row.period}
-                            </Typography>
-                            <Typography variant="caption" color="textSecondary">
-                              {row.monthsAhead} Month{row.monthsAhead > 1 ? 's' : ''}
-                            </Typography>
-                          </Box>
-                        </Box>
-                      </TableCell>
-                      <TableCell>
-                        <Typography variant="h6" fontWeight={700} color="#4A90E2">
-                          {row.predictedValue}
-                        </Typography>
-                      </TableCell>
-                      <TableCell>{getTrendChip(row.trend)}</TableCell>
-                      <TableCell>
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                          <LinearProgress variant="determinate" value={row.confidence}
-                            sx={{
-                              width: 60, height: 6, borderRadius: 3, backgroundColor: '#F0F0F0',
-                              '& .MuiLinearProgress-bar': {
-                                backgroundColor: getConfidenceColor(row.confidence), borderRadius: 3
-                              }
-                            }} />
-                          <Typography variant="caption" fontWeight={600}>{row.confidence}%</Typography>
-                        </Box>
-                      </TableCell>
-                      <TableCell>
-                        <Chip size="small"
-                          icon={<CheckCircleIcon sx={{ fontSize: 14 }} />}
-                          label="Completed"
-                          sx={{ backgroundColor: '#E8F5E9', color: '#4CAF50', fontWeight: 600 }} />
-                      </TableCell>
-                      <TableCell>
-                        <IconButton size="small"
-                          onClick={(e) => { setActionMenuAnchor(e.currentTarget); setActionMenuRow(row); }}>
-                          <MoreVertIcon fontSize="small" />
-                        </IconButton>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-
-              <Menu anchorEl={actionMenuAnchor} open={Boolean(actionMenuAnchor)}
-                onClose={() => setActionMenuAnchor(null)}
-                PaperProps={{ sx: { borderRadius: 2, boxShadow: '0 8px 24px rgba(0,0,0,0.12)', minWidth: 180 } }}>
-                <MenuItemComponent onClick={() => handleViewDetails(actionMenuRow)}
-                  sx={{ gap: 1.5, py: 1.5 }}>
-                  <VisibilityIcon fontSize="small" sx={{ color: '#4A90E2' }} />
-                  <Typography variant="body2">View Details</Typography>
-                </MenuItemComponent>
-                <MenuItemComponent sx={{ gap: 1.5, py: 1.5 }}>
-                  <DownloadIcon fontSize="small" sx={{ color: '#4A90E2' }} />
-                  <Typography variant="body2">Download Report</Typography>
-                </MenuItemComponent>
-                <Divider />
-                <MenuItemComponent onClick={() => handleDeleteRow(actionMenuRow?.id)}
-                  sx={{ gap: 1.5, py: 1.5 }}>
-                  <DeleteIcon fontSize="small" sx={{ color: '#F44336' }} />
-                  <Typography variant="body2" color="error">Delete</Typography>
-                </MenuItemComponent>
-              </Menu>
-            </CardContent>
-          </Card>
-        )}
       </Box>
 
       {/* ── Details Dialog ── */}
@@ -835,7 +765,7 @@ const Prediction = ({ onNavigate, onLogout, uploadedFile, uploadedData }) => {
             {(detailsData.insights || []).map((ins, i) => (
               <Box key={i} sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.5, mb: 0.75 }}>
                 <Box sx={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: '#4A90E2', mt: 0.7, flexShrink: 0 }} />
-                <Typography variant="body2" color="textSecondary">{ins}</Typography>
+                <Typography variant="body2" color="textSecondary">{ins.text || ins}</Typography>
               </Box>
             ))}
           </DialogContent>
