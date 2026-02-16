@@ -3,6 +3,7 @@ from flask_cors import CORS
 import os
 import pandas as pd
 from datetime import datetime, timedelta
+from dateutil.relativedelta import relativedelta  # ✅ Added for proper month arithmetic
 from werkzeug.utils import secure_filename
 import gc
 
@@ -231,12 +232,20 @@ def forecast():
             target_diseases
         )
 
-        # Generate forecast dates
+        # ✅ FIXED: Generate forecast dates using relativedelta for proper month arithmetic
         last_date = df_filtered['date'].max()
+        
+        # Debug: Print the last historical date
+        print(f"📅 Last historical date: {last_date.strftime('%Y-%m-%d')}")
+        
+        # Use relativedelta to add exact months (handles month boundaries correctly)
         forecast_dates = [
-            (last_date + timedelta(days=30 * (i + 1))).strftime('%Y-%m')
+            (last_date + relativedelta(months=i+1)).strftime('%Y-%m')
             for i in range(forecast_months)
         ]
+        
+        # Debug: Print forecast dates
+        print(f"📅 Forecast dates generated: {forecast_dates}")
 
         # Prepare response
         forecast_data = {
