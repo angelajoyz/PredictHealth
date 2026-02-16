@@ -85,6 +85,7 @@ const getDiseaseInfo = (col) => {
 
 const Prediction = ({ onNavigate, onLogout, uploadedFile, uploadedData }) => {
   const [selectedBarangay, setSelectedBarangay] = useState('');
+  // ✅ availableDiseases populated from localStorage (saved by DataImport after file upload)
   const [availableDiseases, setAvailableDiseases] = useState([]);
   const [forecastLoading, setForecastLoading] = useState(false);
   const [forecastData, setForecastData] = useState(null);
@@ -107,22 +108,13 @@ const Prediction = ({ onNavigate, onLogout, uploadedFile, uploadedData }) => {
       if (saved) setSelectedBarangay(JSON.parse(saved).barangay || '');
     }
 
+    // ✅ Load disease columns saved by DataImport from the uploaded file's Health_Data sheet
     const savedDiseases = localStorage.getItem('diseaseColumns');
     if (savedDiseases) {
       const cols = JSON.parse(savedDiseases);
       setAvailableDiseases(cols);
     }
   }, [uploadedData, uploadedFile]);
-
-  // ✅ DEBUG: Check dates from backend
-  useEffect(() => {
-    if (forecastData) {
-      console.log('🔍 DEBUG DATES:');
-      console.log('Last historical:', forecastData.historical_data.dates[forecastData.historical_data.dates.length - 1]);
-      console.log('First forecast:', forecastData.forecast_dates[0]);
-      console.log('All forecast dates:', forecastData.forecast_dates);
-    }
-  }, [forecastData]);
 
   // ── Helpers ────────────────────────────────────────────────────────────────
   const getTrend = (preds) => {
@@ -157,6 +149,7 @@ const Prediction = ({ onNavigate, onLogout, uploadedFile, uploadedData }) => {
   };
 
   const getConfidence = (disease) => {
+    // Deterministic per disease so it doesn't flicker on re-render
     const seeds = {
       dengue_cases: 87, diarrhea_cases: 82, respiratory_cases: 79,
       malnutrition_prevalence_pct: 74, malnutrition_cases: 76,
@@ -174,134 +167,48 @@ const Prediction = ({ onNavigate, onLogout, uploadedFile, uploadedData }) => {
         : [selectedDisease].filter(d => forecastData.predictions?.[d]))
     : [];
 
-  // ── Chart data ──────────────────────────────────────────────────────────────
+  // ── Chart data ─────────────────────────────────────────────────────────────
   const buildChartData = () => {
     if (!forecastData) return [];
 
+    // When "all" is selected, chart shows the first disease
+    const disease = selectedDisease === 'all' ? activeDiseases[0] : selectedDisease;
+    if (!disease) return [];
+
     const data = [];
 
-    if (selectedDisease === 'all') {
-      // ✅ ALL DISEASES - Show total combined cases
-      
-      // Historical months (actual data only)
-      const histDates = forecastData.historical_data.dates.slice(-9);
-      
-      histDates.forEach((date, i) => {
-        let totalActual = 0;
-        
-        activeDiseases.forEach(disease => {
-          const values = forecastData.historical_data[disease] || [];
-          totalActual += values.slice(-9)[i] || 0;
-        });
-        
-        data.push({ 
-          month: date.slice(0, 7), 
-          actual: Math.round(totalActual), 
-          predicted: null 
-        });
-      });
+    // Last 9 historical months for readability
+    const histDates  = forecastData.historical_data.dates.slice(-9);
+    const histValues = (forecastData.historical_data[disease] || []).slice(-9);
+    histDates.forEach((date, i) => {
+      data.push({ month: date.slice(0, 7), actual: Math.round(histValues[i] ?? 0), predicted: null });
+    });
 
-      // Forecast months (predicted data only)
-      forecastData.forecast_dates.forEach((date, i) => {
-        let totalPredicted = 0;
-        
-        activeDiseases.forEach(disease => {
-          const preds = forecastData.predictions[disease] || [];
-          totalPredicted += preds[i] || 0;
-        });
-        
-        data.push({
-          month: date.slice(0, 7),
-          actual: null,
-          predicted: Math.round(totalPredicted),
-        });
+    forecastData.forecast_dates.forEach((date, i) => {
+      data.push({
+        month: date.slice(0, 7),
+        actual: null,
+        predicted: Math.round((forecastData.predictions[disease] || [])[i] ?? 0),
       });
-      
-    } else {
-      // ✅ SINGLE DISEASE
-      const disease = selectedDisease;
-      if (!disease) return [];
+    });
 
-      // Historical months (actual data only)
-      const histDates = forecastData.historical_data.dates.slice(-9);
-      const histValues = (forecastData.historical_data[disease] || []).slice(-9);
-      
-      histDates.forEach((date, i) => {
-        data.push({ 
-          month: date.slice(0, 7), 
-          actual: Math.round(histValues[i] ?? 0), 
-          predicted: null
-        });
-      });
-
-      // Forecast months (predicted data only)
-      forecastData.forecast_dates.forEach((date, i) => {
-        data.push({
-          month: date.slice(0, 7),
-          actual: null,
-          predicted: Math.round((forecastData.predictions[disease] || [])[i] ?? 0),
-        });
-      });
-    }
-
-    console.log('📊 Chart data:', data); // ✅ DEBUG: Check the dates
     return data;
   };
 
-  // ── Summary stats ───────────────────────────────────────────────────────────
+  // ── Summary stats ──────────────────────────────────────────────────────────
   const getSummaryStats = () => {
     if (!forecastData || activeDiseases.length === 0) return null;
 
-    if (selectedDisease === 'all') {
-      // ✅ ALL DISEASES - Calculate total combined stats
-      
-      let totalNextVal = 0;
-      const allPreds = [];
-      
-      activeDiseases.forEach(disease => {
-        const preds = forecastData.predictions[disease] || [];
-        totalNextVal += preds[0] || 0;
-        allPreds.push(preds);
-      });
-      
-      let totalStart = 0;
-      let totalEnd = 0;
-      
-      activeDiseases.forEach((disease, idx) => {
-        const preds = allPreds[idx];
-        totalStart += preds[0] || 0;
-        totalEnd += preds[preds.length - 1] || 0;
-      });
-      
-      const diff = totalEnd - totalStart;
-      const trend = diff > 0.5 ? 'increasing' : diff < -0.5 ? 'decreasing' : 'stable';
-      const pct = ((totalEnd - totalStart) / (totalStart || 1)) * 100;
-      
-      const avgConfidence = Math.round(
-        activeDiseases.reduce((sum, d) => sum + getConfidence(d), 0) / activeDiseases.length
-      );
+    const disease = selectedDisease === 'all' ? activeDiseases[0] : selectedDisease;
+    const preds = forecastData.predictions[disease] || [];
 
-      return {
-        nextVal: Math.round(totalNextVal),
-        trend: trend,
-        pct: (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%',
-        confidence: avgConfidence,
-        diseaseLabel: 'All Diseases (Combined Total)',
-      };
-      
-    } else {
-      // ✅ SINGLE DISEASE
-      const disease = selectedDisease;
-      const preds = forecastData.predictions[disease] || [];
-
-      return {
-        nextVal: Math.round(preds[0] ?? 0),
-        trend: getTrend(preds),
-        pct: getTrendPct(preds),
-        confidence: getConfidence(disease),
-        diseaseLabel: getDiseaseInfo(disease).label,
-      };
-    }
+    return {
+      nextVal:      Math.round(preds[0] ?? 0),
+      trend:        getTrend(preds),
+      pct:          getTrendPct(preds),
+      confidence:   getConfidence(disease),
+      diseaseLabel: getDiseaseInfo(disease).label,
+    };
   };
 
   // ── Key insights ───────────────────────────────────────────────────────────
@@ -313,15 +220,14 @@ const Prediction = ({ onNavigate, onLogout, uploadedFile, uploadedData }) => {
       const pct   = getTrendPct(preds);
       const label = getDiseaseInfo(d).label;
       if (trend === 'increasing')
-        insights.push({ text: `${label} cases expected to increase by ${pct} over the forecast period`, type: 'warning' });
+        insights.push(`${label} cases expected to increase by ${pct} over the forecast period`);
       else if (trend === 'decreasing')
-        insights.push({ text: `${label} cases expected to decrease by ${pct} — positive trend`, type: 'positive' });
+        insights.push(`${label} cases expected to decrease by ${pct} — positive trend`);
       else
-        insights.push({ text: `${label} cases remain stable in ${barangay}`, type: 'neutral' });
+        insights.push(`${label} cases remain stable in ${barangay}`);
     });
-    // ✅ No slice — show ALL diseases, plus monitor note
-    insights.push({ text: `Monitor closely in high-risk areas of ${barangay}`, type: 'info' });
-    return insights;
+    insights.push(`Monitor closely in high-risk areas of ${barangay}`);
+    return insights.slice(0, 4);
   };
 
   const getKeyInsights = () => forecastData ? buildInsights(forecastData, selectedBarangay) : [];
@@ -342,6 +248,7 @@ const Prediction = ({ onNavigate, onLogout, uploadedFile, uploadedData }) => {
     setForecastData(null);
 
     try {
+      // ✅ Use selected disease OR all diseases detected from the uploaded file
       const diseases = selectedDisease === 'all'
         ? availableDiseases
         : [selectedDisease];
@@ -351,11 +258,13 @@ const Prediction = ({ onNavigate, onLogout, uploadedFile, uploadedData }) => {
 
       setForecastData(result);
 
+      // ✅ Update available diseases from what backend actually returned
       if (result.disease_columns && result.disease_columns.length > 0) {
         setAvailableDiseases(result.disease_columns);
         localStorage.setItem('diseaseColumns', JSON.stringify(result.disease_columns));
       }
 
+      // Build forecast history entries
       const now = new Date();
       const dateStr = now.toISOString().slice(0, 10) + ' at ' +
         now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
@@ -475,7 +384,7 @@ const Prediction = ({ onNavigate, onLogout, uploadedFile, uploadedData }) => {
         {/* Controls row */}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 3, flexWrap: 'wrap' }}>
 
-          {/* Disease dropdown */}
+          {/* Disease dropdown — ✅ dynamic from uploaded file */}
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
             <Typography variant="caption" color="textSecondary" fontWeight={600}>
               Disease <span style={{ color: '#F44336' }}>*</span>
@@ -483,6 +392,7 @@ const Prediction = ({ onNavigate, onLogout, uploadedFile, uploadedData }) => {
             <Select value={selectedDisease} onChange={(e) => setSelectedDisease(e.target.value)}
               size="small" sx={{ minWidth: 200, backgroundColor: 'white', borderRadius: 2 }}>
               <MenuItemComponent value="all">All Diseases</MenuItemComponent>
+              {/* ✅ Only shows diseases detected from Health_Data sheet of the uploaded file */}
               {availableDiseases.map(col => {
                 const info = getDiseaseInfo(col);
                 return (
@@ -620,10 +530,11 @@ const Prediction = ({ onNavigate, onLogout, uploadedFile, uploadedData }) => {
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                 <Typography variant="h6" fontWeight={700}>
                   Predicted Trend
-                  {selectedDisease === 'all' 
-                    ? ' — All Diseases (Total Combined Cases)'
-                    : ` — ${getDiseaseInfo(selectedDisease).label}`
-                  }
+                  {selectedDisease !== 'all'
+                    ? ` — ${getDiseaseInfo(selectedDisease).label}`
+                    : activeDiseases[0]
+                    ? ` — ${getDiseaseInfo(activeDiseases[0]).label}`
+                    : ''}
                 </Typography>
                 <Chip label="Actual vs Predicted" size="small"
                   sx={{ backgroundColor: '#EBF3FF', color: '#4A90E2', fontWeight: 600 }} />
@@ -648,53 +559,136 @@ const Prediction = ({ onNavigate, onLogout, uploadedFile, uploadedData }) => {
                 </ComposedChart>
               </ResponsiveContainer>
 
-              {/* ── Key Insights ── ONLY THIS SECTION CHANGED ── */}
+              {/* Key Insights */}
               {insights.length > 0 && (
                 <Box sx={{ mt: 3, p: 2.5, backgroundColor: '#F8F9FA', borderRadius: 2 }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
                     <LightbulbIcon sx={{ fontSize: 16, color: '#4A90E2' }} />
                     <Typography variant="body2" fontWeight={700}>Key Insights</Typography>
-                    <Chip
-                      label={`${insights.length - 1} diseases`}
-                      size="small"
-                      sx={{ ml: 'auto', backgroundColor: '#EBF3FF', color: '#4A90E2', fontWeight: 600, fontSize: 11 }}
-                    />
                   </Box>
-                  {insights.map((insight, i) => {
-                    const dotColor = insight.type === 'warning'  ? '#F44336'
-                      : insight.type === 'positive' ? '#4CAF50'
-                      : insight.type === 'info'     ? '#4A90E2'
-                      : '#9E9E9E';
-                    return (
-                      <Box key={i} sx={{
-                        display: 'flex', alignItems: 'flex-start', gap: 1.5, mb: 1,
-                        p: 1.5, borderRadius: 1.5,
-                        backgroundColor: insight.type === 'warning'  ? '#FFF5F5'
-                          : insight.type === 'positive' ? '#F1FFF5'
-                          : insight.type === 'info'     ? '#EBF3FF'
-                          : 'transparent',
-                        border: `1px solid ${
-                          insight.type === 'warning'  ? '#FFCDD2'
-                          : insight.type === 'positive' ? '#C8E6C9'
-                          : insight.type === 'info'     ? '#BBDEFB'
-                          : 'transparent'
-                        }`,
-                      }}>
-                        <Box sx={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: dotColor, mt: 0.6, flexShrink: 0 }} />
-                        <Typography variant="body2" sx={{ color: '#444', lineHeight: 1.5 }}>
-                          {insight.text}
-                        </Typography>
-                      </Box>
-                    );
-                  })}
+                  {insights.map((insight, i) => (
+                    <Box key={i} sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.5, mb: 0.75 }}>
+                      <Box sx={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: '#4A90E2',
+                        mt: 0.7, flexShrink: 0 }} />
+                      <Typography variant="body2" color="textSecondary">{insight}</Typography>
+                    </Box>
+                  ))}
                 </Box>
               )}
             </CardContent>
           </Card>
         )}
 
-        {/* ── Forecast Details Table ── REMOVED as requested ── */}
+        {/* ── Forecast Details Table ── */}
+        {forecastHistory.length > 0 && (
+          <Card sx={{ borderRadius: 3, boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}>
+            <CardContent>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <Typography variant="h6" fontWeight={700}>Forecast Details</Typography>
+                <Chip label={`${forecastHistory.length} forecasts`} size="small"
+                  sx={{ backgroundColor: '#EBF3FF', color: '#4A90E2', fontWeight: 600 }} />
+              </Box>
 
+              <Table>
+                <TableHead>
+                  <TableRow>
+                    {['Forecast Period', 'Predicted Value', 'Trend', 'Confidence', 'Status', 'Actions'].map(h => (
+                      <TableCell key={h} sx={{ fontWeight: 700, color: '#666', fontSize: 13,
+                        borderBottom: '2px solid #F0F0F0', pb: 1.5 }}>
+                        {h}
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {forecastHistory.map((row) => (
+                    <TableRow key={row.id} hover
+                      sx={{ '&:last-child td': { borderBottom: 0 }, cursor: 'default' }}>
+                      {/* Period */}
+                      <TableCell sx={{ py: 2 }}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                          <Box sx={{ width: 32, height: 32, borderRadius: '50%',
+                            backgroundColor: '#EBF3FF', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <PsychologyIcon sx={{ fontSize: 16, color: '#4A90E2' }} />
+                          </Box>
+                          <Box>
+                            <Typography variant="body2" fontWeight={600}>
+                              {row.label} — {row.period}
+                            </Typography>
+                            <Typography variant="caption" color="textSecondary">
+                              {row.monthsAhead} Month{row.monthsAhead > 1 ? 's' : ''}
+                            </Typography>
+                          </Box>
+                        </Box>
+                      </TableCell>
+
+                      {/* Value */}
+                      <TableCell>
+                        <Typography variant="h6" fontWeight={700} color="#4A90E2">
+                          {row.predictedValue}
+                        </Typography>
+                      </TableCell>
+
+                      {/* Trend */}
+                      <TableCell>{getTrendChip(row.trend)}</TableCell>
+
+                      {/* Confidence */}
+                      <TableCell>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                          <LinearProgress variant="determinate" value={row.confidence}
+                            sx={{
+                              width: 60, height: 6, borderRadius: 3, backgroundColor: '#F0F0F0',
+                              '& .MuiLinearProgress-bar': {
+                                backgroundColor: getConfidenceColor(row.confidence), borderRadius: 3
+                              }
+                            }} />
+                          <Typography variant="caption" fontWeight={600}>{row.confidence}%</Typography>
+                        </Box>
+                      </TableCell>
+
+                      {/* Status */}
+                      <TableCell>
+                        <Chip size="small"
+                          icon={<CheckCircleIcon sx={{ fontSize: 14 }} />}
+                          label="Completed"
+                          sx={{ backgroundColor: '#E8F5E9', color: '#4CAF50', fontWeight: 600 }} />
+                      </TableCell>
+
+                      {/* Actions */}
+                      <TableCell>
+                        <IconButton size="small"
+                          onClick={(e) => { setActionMenuAnchor(e.currentTarget); setActionMenuRow(row); }}>
+                          <MoreVertIcon fontSize="small" />
+                        </IconButton>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+
+              {/* Action menu */}
+              <Menu anchorEl={actionMenuAnchor} open={Boolean(actionMenuAnchor)}
+                onClose={() => setActionMenuAnchor(null)}
+                PaperProps={{ sx: { borderRadius: 2, boxShadow: '0 8px 24px rgba(0,0,0,0.12)', minWidth: 180 } }}>
+                <MenuItemComponent onClick={() => handleViewDetails(actionMenuRow)}
+                  sx={{ gap: 1.5, py: 1.5 }}>
+                  <VisibilityIcon fontSize="small" sx={{ color: '#4A90E2' }} />
+                  <Typography variant="body2">View Details</Typography>
+                </MenuItemComponent>
+                <MenuItemComponent sx={{ gap: 1.5, py: 1.5 }}>
+                  <DownloadIcon fontSize="small" sx={{ color: '#4A90E2' }} />
+                  <Typography variant="body2">Download Report</Typography>
+                </MenuItemComponent>
+                <Divider />
+                <MenuItemComponent onClick={() => handleDeleteRow(actionMenuRow?.id)}
+                  sx={{ gap: 1.5, py: 1.5 }}>
+                  <DeleteIcon fontSize="small" sx={{ color: '#F44336' }} />
+                  <Typography variant="body2" color="error">Delete</Typography>
+                </MenuItemComponent>
+              </Menu>
+            </CardContent>
+          </Card>
+        )}
       </Box>
 
       {/* ── Details Dialog ── */}
@@ -765,7 +759,7 @@ const Prediction = ({ onNavigate, onLogout, uploadedFile, uploadedData }) => {
             {(detailsData.insights || []).map((ins, i) => (
               <Box key={i} sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.5, mb: 0.75 }}>
                 <Box sx={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: '#4A90E2', mt: 0.7, flexShrink: 0 }} />
-                <Typography variant="body2" color="textSecondary">{ins.text || ins}</Typography>
+                <Typography variant="body2" color="textSecondary">{ins}</Typography>
               </Box>
             ))}
           </DialogContent>
