@@ -210,15 +210,6 @@ const Prediction = ({ onNavigate, onLogout, uploadedFile, uploadedData }) => {
     return (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%';
   };
 
-  const getConfidence = (disease) => {
-    const seeds = {
-      dengue_cases: 87, diarrhea_cases: 82, respiratory_cases: 79,
-      malnutrition_prevalence_pct: 74, malnutrition_cases: 76,
-      hypertension_cases: 83, diabetes_cases: 80,
-    };
-    return seeds[disease] ?? 78;
-  };
-
   const getConfidenceColor = (val) => val >= 85 ? '#4CAF50' : val >= 75 ? '#FFA726' : '#F44336';
 
   // ── Active diseases (based on current selection) ───────────────────────────
@@ -360,16 +351,11 @@ const Prediction = ({ onNavigate, onLogout, uploadedFile, uploadedData }) => {
       const diff = totalEnd - totalStart;
       const trend = diff > 0.5 ? 'increasing' : diff < -0.5 ? 'decreasing' : 'stable';
       const pct = ((totalEnd - totalStart) / (totalStart || 1)) * 100;
-      
-      const avgConfidence = Math.round(
-        activeDiseases.reduce((sum, d) => sum + getConfidence(d), 0) / activeDiseases.length
-      );
 
       return {
         nextVal: Math.round(totalNextVal),
         trend: trend,
         pct: (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%',
-        confidence: avgConfidence,
         diseaseLabel: 'All Diseases (Combined Total)',
       };
       
@@ -382,7 +368,6 @@ const Prediction = ({ onNavigate, onLogout, uploadedFile, uploadedData }) => {
         nextVal: Math.round(preds[0] ?? 0),
         trend: getTrend(preds),
         pct: getTrendPct(preds),
-        confidence: getConfidence(disease),
         diseaseLabel: getDiseaseInfo(disease).label,
       };
     }
@@ -479,7 +464,6 @@ const Prediction = ({ onNavigate, onLogout, uploadedFile, uploadedData }) => {
             monthsAhead: i + 1,
             predictedValue: Math.round(preds[i] ?? 0),
             trend: getTrend(preds),
-            confidence: getConfidence(disease),
             status: 'Completed',
             createdAt: dateStr,
             fileName:
@@ -676,7 +660,7 @@ const Prediction = ({ onNavigate, onLogout, uploadedFile, uploadedData }) => {
           </Box>
         </Box>
 
-        {/* Loading - MOVED BELOW existing content */}
+        {/* Loading */}
         {forecastLoading && (
           <Box sx={{ mb: 3 }}>
             <LinearProgress />
@@ -696,9 +680,9 @@ const Prediction = ({ onNavigate, onLogout, uploadedFile, uploadedData }) => {
           </Alert>
         )}
 
-        {/* ── Summary stat cards ── */}
+        {/* ── Summary stat cards (2 cards only) ── */}
         {stats && (
-          <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 2, mb: 3 }}>
+          <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 2, mb: 3 }}>
             {/* Next Period Forecast */}
             <Card sx={{ borderRadius: 3, boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}>
               <CardContent>
@@ -712,10 +696,10 @@ const Prediction = ({ onNavigate, onLogout, uploadedFile, uploadedData }) => {
                     <PsychologyIcon sx={{ fontSize: 18, color: '#4A90E2' }} />
                   </Box>
                 </Box>
-                <Typography variant="h3" fontWeight={700} sx={{ my: 1 }}>
+                <Typography variant="h3" fontWeight={700} sx={{ my: 1, textAlign: 'center' }}>
                   {stats.nextVal}
                 </Typography>
-                <Typography variant="caption" color="textSecondary">
+                <Typography variant="caption" color="textSecondary" sx={{ display: 'block', textAlign: 'center' }}>
                   {stats.diseaseLabel} cases ({forecastHorizon} month{parseInt(forecastHorizon) > 1 ? 's' : ''} ahead)
                 </Typography>
               </CardContent>
@@ -739,35 +723,15 @@ const Prediction = ({ onNavigate, onLogout, uploadedFile, uploadedData }) => {
                       : <RemoveIcon sx={{ fontSize: 18, color: '#757575' }} />}
                   </Box>
                 </Box>
-                <Typography variant="h3" fontWeight={700} sx={{ my: 1,
+                <Typography variant="h3" fontWeight={700} sx={{ my: 1, textAlign: 'center',
                   color: stats.trend === 'increasing' ? '#F44336' : stats.trend === 'decreasing' ? '#4CAF50' : '#757575' }}>
                   {stats.pct}
                 </Typography>
-                <Typography variant="caption" color="textSecondary">
+                <Typography variant="caption" color="textSecondary" sx={{ display: 'block', textAlign: 'center' }}>
                   {stats.trend === 'increasing' ? 'Increasing from last period'
                     : stats.trend === 'decreasing' ? 'Decreasing from last period'
                     : 'Stable from last period'}
                 </Typography>
-              </CardContent>
-            </Card>
-
-            {/* Model Confidence */}
-            <Card sx={{ borderRadius: 3, boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}>
-              <CardContent>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                  <Typography variant="caption" color="textSecondary" fontWeight={600}
-                    sx={{ textTransform: 'uppercase', letterSpacing: 1 }}>
-                    Model Confidence
-                  </Typography>
-                  <Box sx={{ width: 32, height: 32, borderRadius: '50%',
-                    backgroundColor: '#E8F5E9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <CheckCircleIcon sx={{ fontSize: 18, color: '#4CAF50' }} />
-                  </Box>
-                </Box>
-                <Typography variant="h3" fontWeight={700} sx={{ my: 1, color: getConfidenceColor(stats.confidence) }}>
-                  {stats.confidence}%
-                </Typography>
-                <Typography variant="caption" color="textSecondary">Prediction accuracy</Typography>
               </CardContent>
             </Card>
           </Box>
@@ -893,21 +857,6 @@ const Prediction = ({ onNavigate, onLogout, uploadedFile, uploadedData }) => {
                 <Typography variant="h4" fontWeight={700} color="#4A90E2">
                   {detailsData.predictedValue}
                 </Typography>
-              </Box>
-              <Box>
-                <Typography variant="caption" color="textSecondary" display="block" sx={{ mb: 1 }}>
-                  Confidence Level
-                </Typography>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <LinearProgress variant="determinate" value={detailsData.confidence}
-                    sx={{
-                      flex: 1, height: 8, borderRadius: 4, backgroundColor: '#F0F0F0',
-                      '& .MuiLinearProgress-bar': {
-                        backgroundColor: getConfidenceColor(detailsData.confidence), borderRadius: 4
-                      }
-                    }} />
-                  <Typography variant="body2" fontWeight={700}>{detailsData.confidence}%</Typography>
-                </Box>
               </Box>
             </Box>
 
