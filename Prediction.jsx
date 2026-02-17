@@ -108,10 +108,18 @@ const Prediction = ({ onNavigate, onLogout, uploadedFile, uploadedData }) => {
       if (saved) setSelectedBarangay(JSON.parse(saved).barangay || '');
     }
 
+    // ✅ FIXED: Always reload disease columns from localStorage (set by DataImport)
     const savedDiseases = localStorage.getItem('diseaseColumns');
     if (savedDiseases) {
-      const cols = JSON.parse(savedDiseases);
-      setAvailableDiseases(cols);
+      try {
+        const cols = JSON.parse(savedDiseases);
+        if (cols && cols.length > 0) {
+          setAvailableDiseases(cols);
+          console.log('✅ Disease columns loaded from localStorage:', cols);
+        }
+      } catch (e) {
+        console.error('Error loading disease columns:', e);
+      }
     }
 
     // ✅ Load forecast history from localStorage
