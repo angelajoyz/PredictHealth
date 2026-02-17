@@ -127,10 +127,15 @@ def get_barangays():
 
         print(f"✅ Barangays: {len(barangays)} | Diseases detected: {disease_columns}")
 
-        # Clean up the temporary file
+        # ✅ FIXED: Clean up the temporary file with proper error handling
         try:
-            os.remove(filepath)
-        except:
+            if os.path.exists(filepath):
+                os.remove(filepath)
+                print(f"✅ Cleaned up file: {filepath}")
+            else:
+                print(f"⚠️ File not found (already deleted): {filepath}")
+        except (PermissionError, FileNotFoundError, OSError) as e:
+            print(f"⚠️ Could not delete {filepath}: {e}")
             pass
 
         return jsonify({
@@ -139,11 +144,11 @@ def get_barangays():
         }), 200
 
     except Exception as e:
-        # Clean up on error
+        # ✅ FIXED: Clean up on error with proper error handling
         if filepath and os.path.exists(filepath):
             try:
                 os.remove(filepath)
-            except:
+            except (PermissionError, FileNotFoundError, OSError):
                 pass
         import traceback
         print(traceback.format_exc())
@@ -266,24 +271,28 @@ def forecast():
         del df_filtered, scaled_data, X, y, forecaster
         gc.collect()
 
-        # Now try to remove the file
+        # ✅ FIXED: Now try to remove the file with proper error handling
         try:
-            os.remove(filepath)
-        except PermissionError:
-            # If still locked, we'll leave it and clean up later
-            print(f"⚠️ Could not delete {filepath} - will be cleaned up later")
+            if os.path.exists(filepath):
+                os.remove(filepath)
+                print(f"✅ Cleaned up file: {filepath}")
+            else:
+                print(f"⚠️ File not found (already deleted): {filepath}")
+        except (PermissionError, FileNotFoundError, OSError) as e:
+            # If still locked or missing, we'll leave it and clean up later
+            print(f"⚠️ Could not delete {filepath}: {e}")
             pass
 
         print(f"✅ Forecast completed for {barangay}")
         return jsonify(forecast_data), 200
 
     except Exception as e:
-        # Clean up on error
+        # ✅ FIXED: Clean up on error with proper error handling
         if filepath and os.path.exists(filepath):
             try:
                 gc.collect()
                 os.remove(filepath)
-            except:
+            except (PermissionError, FileNotFoundError, OSError):
                 pass
 
         import traceback
