@@ -9,15 +9,9 @@ import DataImport from './DataImport';
 
 const theme = createTheme({
   palette: {
-    primary: {
-      main: '#4A90E2',
-    },
-    secondary: {
-      main: '#E94E77',
-    },
-    background: {
-      default: '#F5F7FA',
-    },
+    primary: { main: '#4A90E2' },
+    secondary: { main: '#E94E77' },
+    background: { default: '#F5F7FA' },
   },
   typography: {
     fontFamily: '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", sans-serif',
@@ -25,60 +19,85 @@ const theme = createTheme({
   components: {
     MuiCard: {
       styleOverrides: {
-        root: {
-          borderRadius: 16,
-          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)',
-        },
+        root: { borderRadius: 16, boxShadow: '0 2px 8px rgba(0,0,0,0.04)' },
       },
     },
     MuiButton: {
       styleOverrides: {
-        root: {
-          borderRadius: 10,
-          textTransform: 'none',
-          fontWeight: 500,
-        },
+        root: { borderRadius: 10, textTransform: 'none', fontWeight: 500 },
       },
     },
   },
 });
 
 function App() {
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [currentPage, setCurrentPage] = useState('dashboard');
+  const [currentPage, setCurrentPage] = useState(
+    () => localStorage.getItem('currentPage') || 'login'
+  );
 
-  const handleLogin = (success) => {
-    setIsLoggedIn(success);
+  const [uploadedFile, setUploadedFile] = useState(null);
+
+  // ── uploadedData no longer carries barangay — that's decided in Prediction now ──
+  const [uploadedData, setUploadedData] = useState(() => {
+    const saved = localStorage.getItem('uploadedData');
+    return saved ? JSON.parse(saved) : null;
+  });
+
+  const handleNavigate = (page) => {
+    localStorage.setItem('currentPage', page);
+    setCurrentPage(page);
   };
 
   const handleLogout = () => {
-    setIsLoggedIn(false);
-    setCurrentPage('dashboard');
+    localStorage.removeItem('currentPage');
+    setCurrentPage('login');
   };
 
-  if (!isLoggedIn) {
-    return (
-      <ThemeProvider theme={theme}>
-        <CssBaseline />
-        <Login onLogin={handleLogin} />
-      </ThemeProvider>
-    );
-  }
+  const handleDataUploaded = (data) => {
+    setUploadedFile(data.file);
+    // Store file + uploadDate only — barangay selection happens in Prediction
+    setUploadedData({ file: data.file, uploadDate: data.uploadDate });
+  };
 
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      {currentPage === 'dashboard' ? (
-        <Dashboard onNavigate={setCurrentPage} onLogout={handleLogout} />
-      ) : currentPage === 'history' ? (
-        <History onNavigate={setCurrentPage} onLogout={handleLogout} />
-      ) : currentPage === 'prediction' ? (
-        <Prediction onNavigate={setCurrentPage} onLogout={handleLogout} />
-      ) : currentPage === 'dataimport' ? (
-        <DataImport onNavigate={setCurrentPage} onLogout={handleLogout} />
-      ) : (
-        <Dashboard onNavigate={setCurrentPage} onLogout={handleLogout} />
-      )}
+      <div>
+        {currentPage === 'login' && (
+          <Login onLogin={() => handleNavigate('dashboard')} />
+        )}
+
+        {currentPage === 'dashboard' && (
+          <Dashboard
+            onNavigate={handleNavigate}
+            onLogout={handleLogout}
+          />
+        )}
+
+        {currentPage === 'history' && (
+          <History
+            onNavigate={handleNavigate}
+            onLogout={handleLogout}
+          />
+        )}
+
+        {currentPage === 'dataimport' && (
+          <DataImport
+            onNavigate={handleNavigate}
+            onLogout={handleLogout}
+            onDataUploaded={handleDataUploaded}
+          />
+        )}
+
+        {currentPage === 'prediction' && (
+          <Prediction
+            onNavigate={handleNavigate}
+            onLogout={handleLogout}
+            uploadedFile={uploadedFile}
+            uploadedData={uploadedData}
+          />
+        )}
+      </div>
     </ThemeProvider>
   );
 }
