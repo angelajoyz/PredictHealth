@@ -212,7 +212,7 @@ const DataImport = ({ onNavigate, onLogout, onDataUploaded }) => {
   const [barangays, setBarangays]               = useState([]);
   const [diseaseColumns, setDiseaseColumns]     = useState([]);
   const [rowCount, setRowCount]                 = useState(null);
-  const [datasetCity, setDatasetCity]           = useState(null); // ← NEW state
+  const [datasetCity, setDatasetCity]           = useState(null);
 
   const [dialogType, setDialogType]   = useState(null);
   const [pendingFile, setPendingFile] = useState(null);
@@ -247,13 +247,19 @@ const DataImport = ({ onNavigate, onLogout, onDataUploaded }) => {
       const sameBarangays     = newBarangays.length === existingBarangays.length && newBarangays.every(b => existingBarangays.includes(b));
       const sameDiseases      = newDiseases.length  === existingDiseases.length  && newDiseases.every(d => existingDiseases.includes(d));
 
+      // ✅ DEBUG LOG
+      console.log('📥 API Response:', response);
+      console.log('   Barangays received:', newBarangays.length, newBarangays);
+      console.log('   Diseases received:', newDiseases.length, newDiseases);
+
       setPendingFile({ file, scannedResponse: response });
       setDialogMeta({ barangaysMatch: sameBarangays, diseasesMatch: sameDiseases });
 
       if (sameBarangays && sameDiseases)        setDialogType('extension');
       else if (!sameBarangays && !sameDiseases) setDialogType('replacement');
       else                                      setDialogType('conflict');
-    } catch {
+    } catch (err) {
+      console.error('❌ Error detecting dialog type:', err);
       setPendingFile({ file, scannedResponse: null });
       setDialogMeta({ barangaysMatch: false, diseasesMatch: false });
       setDialogType('replacement');
@@ -290,18 +296,33 @@ const DataImport = ({ onNavigate, onLogout, onDataUploaded }) => {
 
   // ── Apply pre-scanned response ────────────────────────────────────────────
   const applyScannedResponse = (file, response) => {
+    console.log('✅ Applying scanned response:', response);
+    
     setSelectedFile(file);
-    setBarangays(response.barangays || []);
-    setDiseaseColumns(response.disease_columns || []);
+    
+    // ✅ CRITICAL: Set barangays state from response
+    const receivedBarangays = response.barangays || [];
+    const receivedDiseases = response.disease_columns || [];
+    
+    console.log('   Setting barangays state:', receivedBarangays.length, receivedBarangays);
+    console.log('   Setting diseases state:', receivedDiseases.length, receivedDiseases);
+    
+    setBarangays(receivedBarangays);
+    setDiseaseColumns(receivedDiseases);
+    
     if (response.row_count != null) setRowCount(response.row_count);
-    if (response.city)              setDatasetCity(response.city); // ← set state
+    if (response.city)              setDatasetCity(response.city);
 
-    if (response.barangays?.length > 0)       localStorage.setItem('availableBarangays', JSON.stringify(response.barangays));
-    if (response.disease_columns?.length > 0)  localStorage.setItem('diseaseColumns',     JSON.stringify(response.disease_columns));
+    // ✅ Save to localStorage
+    if (receivedBarangays.length > 0)  localStorage.setItem('availableBarangays', JSON.stringify(receivedBarangays));
+    if (receivedDiseases.length > 0)   localStorage.setItem('diseaseColumns',     JSON.stringify(receivedDiseases));
     if (response.city)       localStorage.setItem('datasetCity',      response.city);
     if (response.start_date) localStorage.setItem('datasetStartDate', response.start_date);
     if (response.end_date)   localStorage.setItem('datasetEndDate',   response.end_date);
+    
     setValidationStatus('success');
+    
+    console.log('✅ State updated. barangays.length =', receivedBarangays.length);
   };
 
   // ── Clear cached data ─────────────────────────────────────────────────────
@@ -330,27 +351,43 @@ const DataImport = ({ onNavigate, onLogout, onDataUploaded }) => {
     setBarangays([]); setDiseaseColumns([]); setValidationErrors([]);
     setRowCount(null); setDatasetCity(null);
 
-    // Minimum 4.5s so all 5 animation steps are always visible
     const MIN_MS = 4500;
 
     try {
+      console.log('📤 Uploading file:', file.name);
+      
       const [response] = await Promise.all([
         getBarangays(file),
         new Promise(resolve => setTimeout(resolve, MIN_MS)),
       ]);
-      setBarangays(response.barangays || []);
-      setDiseaseColumns(response.disease_columns || []);
+      
+      console.log('📥 API Response:', response);
+      console.log('   Barangays received:', response.barangays?.length, response.barangays);
+      console.log('   Diseases received:', response.disease_columns?.length, response.disease_columns);
+      
+      // ✅ CRITICAL: Set state from response
+      const receivedBarangays = response.barangays || [];
+      const receivedDiseases = response.disease_columns || [];
+      
+      setBarangays(receivedBarangays);
+      setDiseaseColumns(receivedDiseases);
+      
       if (response.row_count != null) setRowCount(response.row_count);
       if (response.city)              setDatasetCity(response.city);
 
-      if (response.barangays?.length > 0)       localStorage.setItem('availableBarangays', JSON.stringify(response.barangays));
-      if (response.disease_columns?.length > 0)  localStorage.setItem('diseaseColumns',     JSON.stringify(response.disease_columns));
+      // ✅ Save to localStorage
+      if (receivedBarangays.length > 0)  localStorage.setItem('availableBarangays', JSON.stringify(receivedBarangays));
+      if (receivedDiseases.length > 0)   localStorage.setItem('diseaseColumns',     JSON.stringify(receivedDiseases));
       if (response.city)       localStorage.setItem('datasetCity',      response.city);
       if (response.start_date) localStorage.setItem('datasetStartDate', response.start_date);
       if (response.end_date)   localStorage.setItem('datasetEndDate',   response.end_date);
 
       setValidationStatus('success');
+      
+      console.log('✅ Upload complete. barangays.length =', receivedBarangays.length);
+      
     } catch (error) {
+      console.error('❌ Upload error:', error);
       setValidationStatus('error');
       setValidationErrors([error.message]);
     }
@@ -453,7 +490,9 @@ const DataImport = ({ onNavigate, onLogout, onDataUploaded }) => {
                 {validationStatus === 'success' && (
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, p: '9px 14px', borderRadius: '8px', backgroundColor: T.okBg, border: `1px solid ${T.okBorder}` }}>
                     <CheckCircleIcon sx={{ fontSize: 15, color: T.ok, flexShrink: 0 }} />
-                    <Typography sx={{ fontSize: 12.5, color: T.ok, fontWeight: 500 }}>File validated successfully — see dataset summary below.</Typography>
+                    <Typography sx={{ fontSize: 12.5, color: T.ok, fontWeight: 500 }}>
+                      File validated successfully — found {barangays.length} barangay{barangays.length !== 1 ? 's' : ''}, {diseaseColumns.length} disease type{diseaseColumns.length !== 1 ? 's' : ''}.
+                    </Typography>
                   </Box>
                 )}
               </Box>
@@ -490,7 +529,7 @@ const DataImport = ({ onNavigate, onLogout, onDataUploaded }) => {
               {barangays.length > 0 && (
                 <Box sx={{ mb: 1.75 }}>
                   <Typography sx={{ fontSize: 11.5, fontWeight: 600, color: T.textMuted, mb: 0.75, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                    Barangays in dataset
+                    Barangays in dataset ({barangays.length})
                   </Typography>
                   <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                     {barangays.map(b => (
@@ -504,7 +543,7 @@ const DataImport = ({ onNavigate, onLogout, onDataUploaded }) => {
               {diseaseColumns.length > 0 && (
                 <Box sx={{ mb: 1.75 }}>
                   <Typography sx={{ fontSize: 11.5, fontWeight: 600, color: T.textMuted, mb: 0.75, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                    Detected disease types
+                    Detected disease types ({diseaseColumns.length})
                   </Typography>
                   <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                     {diseaseColumns.map(col => (

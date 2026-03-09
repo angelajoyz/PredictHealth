@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import os
+import re
 import pandas as pd
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
@@ -10,6 +11,8 @@ import gc
 from config import Config
 from models.data_processor import DataProcessor
 from models.lstm_model import LSTMForecaster
+from smart_health_preprocessor import SmartHealthPreprocessor
+from barangay_city_detector import detect_city_from_barangays  # ✅ NEW
 
 app = Flask(__name__)
 app.config.from_object(Config)
@@ -27,42 +30,66 @@ def after_request(response):
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 os.makedirs(app.config['MODEL_FOLDER'], exist_ok=True)
 
+
 def allowed_file(filename):
     return '.' in filename and \
            filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
+
 
 def detect_disease_columns(df):
     exclude = {'city', 'barangay', 'year', 'month', 'health_facilities_count'}
     return [col for col in df.columns if col.endswith('_cases') and col not in exclude]
 
+
 def load_and_merge_sheets(file_path):
-    with pd.ExcelFile(file_path) as xl:
-        sheets = xl.sheet_names
+    try:
+        preprocessor = SmartHealthPreprocessor()
+        df = preprocessor.process_file(file_path)
+        df = preprocessor.complete_time_series(df)
+        return df
+    except Exception as e:
+        print(f"⚠️ Preprocessor failed, trying fallback read: {e}")
+        return pd.read_excel(file_path, sheet_name=0)
 
-        if 'Unified_Data' in sheets:
-            df = pd.read_excel(xl, sheet_name='Unified_Data')
-            if 'Health_Data' in sheets:
-                df_health = pd.read_excel(xl, sheet_name='Health_Data')
-                new_cols = [c for c in df_health.columns
-                            if c.endswith('_cases') and c not in df.columns]
-                if new_cols:
-                    merge_keys = [k for k in ['city', 'barangay', 'year', 'month']
-                                  if k in df.columns and k in df_health.columns]
-                    df = df.merge(df_health[merge_keys + new_cols], on=merge_keys, how='left')
 
-        elif 'Health_Data' in sheets:
-            df = pd.read_excel(xl, sheet_name='Health_Data')
-            for sheet in ['Climate_Data', 'Environmental_Data']:
-                if sheet in sheets:
-                    other = pd.read_excel(xl, sheet_name=sheet)
-                    merge_keys = [k for k in ['city', 'barangay', 'year', 'month']
-                                  if k in df.columns and k in other.columns]
-                    df = df.merge(other, on=merge_keys, how='left')
+def resolve_city(df, filename=''):
+    """
+    Auto-detect city using 4-level priority:
+      1. City column in file (not blank / not 'Unknown')
+      2. Auto-detect from barangay names  ← MAIN NEW FEATURE
+      3. Guess from filename
+      4. Return '' so frontend can show a manual input
+    """
+    # ── Level 1: from file ──
+    if 'city' in df.columns:
+        city_vals = df['city'].dropna().astype(str)
+        city_vals = city_vals[~city_vals.str.strip().str.lower().isin(['', 'unknown'])]
+        if not city_vals.empty:
+            city = city_vals.iloc[0].strip()
+            print(f"   📍 City (from file): {city}")
+            return city
 
-        else:
-            df = pd.read_excel(xl, sheet_name=0)
+    # ── Level 2: detect from barangay names ──
+    if 'barangay' in df.columns:
+        barangays = df['barangay'].dropna().unique().tolist()
+        city = detect_city_from_barangays(barangays)
+        if city:
+            print(f"   📍 City (auto-detected from barangays): {city}")
+            return city
 
-    return df
+    # ── Level 3: from filename ──
+    if filename:
+        name = os.path.splitext(os.path.basename(filename))[0]
+        parts = re.split(r'[_\-\s]+', name)
+        if parts:
+            candidate = parts[0].strip()
+            skip = {'data', 'health', 'file', 'upload', 'report', 'cchain', 'xlsx', 'xls'}
+            if len(candidate) > 2 and candidate.lower() not in skip:
+                print(f"   📍 City (from filename): {candidate}")
+                return candidate
+
+    print(f"   ⚠️  City not detected")
+    return ''
 
 
 @app.route('/api/health', methods=['GET'])
@@ -72,7 +99,10 @@ def health_check():
 
 @app.route('/api/barangays', methods=['POST'])
 def get_barangays():
-    """Get barangays, disease columns, city, and dataset date range from uploaded file"""
+    """
+    Returns: barangays, disease_columns, city (auto-detected), city_detected flag, date range.
+    If city_detected=False, frontend should show a manual city input field.
+    """
     filepath = None
 
     if 'file' not in request.files:
@@ -91,45 +121,45 @@ def get_barangays():
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
 
-        with pd.ExcelFile(filepath) as xl:
-            sheets = xl.sheet_names
-            if 'Health_Data' in sheets:
-                df_source = pd.read_excel(xl, sheet_name='Health_Data')
-            elif 'Unified_Data' in sheets:
-                df_source = pd.read_excel(xl, sheet_name='Unified_Data')
-            else:
-                df_source = pd.read_excel(xl, sheet_name=0)
+        preprocessor = SmartHealthPreprocessor()
+        df_processed = preprocessor.process_file(filepath)
+        df_processed = preprocessor.complete_time_series(df_processed)
 
-        barangays       = sorted(df_source['barangay'].dropna().unique().tolist())
-        disease_columns = detect_disease_columns(df_source)
+        # ── Barangays ──
+        if 'barangay' in df_processed.columns:
+            barangays = sorted(df_processed['barangay'].dropna().unique().tolist())
+        else:
+            barangays = ['Unknown']
 
-        # ✅ Extract city
-        city = ''
-        if 'city' in df_source.columns:
-            city_vals = df_source['city'].dropna()
-            if not city_vals.empty:
-                city = str(city_vals.iloc[0])
+        # ── Disease columns ──
+        disease_columns = [c for c in df_processed.columns if c.endswith('_cases')]
 
-        # ✅ Extract dataset date range (used by frontend to call /api/climate)
-        start_date = ''
-        end_date   = ''
-        if 'year' in df_source.columns and 'month' in df_source.columns:
-            df_source['_date'] = pd.to_datetime(
-                df_source['year'].astype(str) + '-' +
-                df_source['month'].astype(str).str.zfill(2) + '-01'
+        # ── City: 4-level auto-detection ✅ ──
+        city = resolve_city(df_processed, filename)
+        city_detected = bool(city)
+
+        # ── Date range ──
+        start_date = end_date = ''
+        if 'year' in df_processed.columns and 'month' in df_processed.columns:
+            df_processed['_date'] = pd.to_datetime(
+                df_processed['year'].astype(str) + '-' +
+                df_processed['month'].astype(str).str.zfill(2) + '-01',
+                errors='coerce'
             )
-            start_date = df_source['_date'].min().strftime('%Y-%m-%d')
-            end_date   = df_source['_date'].max().strftime('%Y-%m-%d')
+            df_processed = df_processed.dropna(subset=['_date'])
+            if not df_processed.empty:
+                start_date = df_processed['_date'].min().strftime('%Y-%m-%d')
+                end_date   = df_processed['_date'].max().strftime('%Y-%m-%d')
 
-        del df_source
+        del df_processed
         gc.collect()
 
-        print(f"✅ Barangays: {len(barangays)} | Diseases: {disease_columns} | City: {city} | Range: {start_date} → {end_date}")
+        print(f"✅ Barangays: {len(barangays)} | Diseases: {disease_columns} | "
+              f"City: '{city}' (detected={city_detected}) | Range: {start_date} → {end_date}")
 
         try:
             if os.path.exists(filepath):
                 os.remove(filepath)
-                print(f"✅ Cleaned up file: {filepath}")
         except (PermissionError, FileNotFoundError, OSError) as e:
             print(f"⚠️ Could not delete {filepath}: {e}")
 
@@ -137,8 +167,9 @@ def get_barangays():
             'barangays':       barangays,
             'disease_columns': disease_columns,
             'city':            city,
-            'start_date':      start_date,   # ✅ NEW
-            'end_date':        end_date,     # ✅ NEW
+            'city_detected':   city_detected,
+            'start_date':      start_date,
+            'end_date':        end_date,
         }), 200
 
     except Exception as e:
@@ -154,55 +185,44 @@ def get_barangays():
 
 @app.route('/api/climate', methods=['GET'])
 def get_climate():
-    """
-    Fetch real historical climate data from Open-Meteo
-    for the city and date range of the uploaded dataset.
-
-    Query params:
-        city       — city name from dataset (e.g. "Las Piñas")
-        start_date — YYYY-MM-DD (first month of dataset)
-        end_date   — YYYY-MM-DD (last month of dataset)
-    """
     import requests as req
 
     city       = request.args.get('city', '').strip()
     start_date = request.args.get('start_date', '').strip()
     end_date   = request.args.get('end_date', '').strip()
 
-    if not city or not start_date or not end_date:
-        return jsonify({'error': 'city, start_date, and end_date are required'}), 400
+    if not city:
+        return jsonify({
+            'error': 'City name is required for climate data.',
+            'needs_city_input': True
+        }), 400
+
+    if not start_date or not end_date:
+        return jsonify({'error': 'start_date and end_date are required'}), 400
 
     try:
-        # ── Step 1: Geocoding — city name → lat/lng ──────────────────
         geo_url = 'https://geocoding-api.open-meteo.com/v1/search'
-        geo_res = req.get(geo_url, params={
-            'name':         city,
-            'count':        1,
-            'language':     'en',
-            'format':       'json',
-            'country_code': 'PH',
-        }, timeout=10)
-        geo_data = geo_res.json()
-
-        if not geo_data.get('results'):
-            # Fallback: try without country filter
-            geo_res = req.get(geo_url, params={
-                'name':     city,
-                'count':    1,
-                'language': 'en',
-                'format':   'json',
-            }, timeout=10)
+        geo_data = {}
+        for params in [
+            {'name': city, 'count': 1, 'language': 'en', 'format': 'json', 'country_code': 'PH'},
+            {'name': city, 'count': 1, 'language': 'en', 'format': 'json'},
+        ]:
+            geo_res  = req.get(geo_url, params=params, timeout=10)
             geo_data = geo_res.json()
+            if geo_data.get('results'):
+                break
 
         if not geo_data.get('results'):
-            return jsonify({'error': f'Could not find coordinates for city: {city}'}), 404
+            return jsonify({
+                'error': f"Could not find coordinates for '{city}'. Please check the city name.",
+                'needs_city_input': True
+            }), 404
 
         lat           = geo_data['results'][0]['latitude']
         lng           = geo_data['results'][0]['longitude']
         resolved_city = geo_data['results'][0].get('name', city)
         print(f"📍 Geocoded '{city}' → {resolved_city} ({lat}, {lng})")
 
-        # ── Step 2: Historical monthly climate data ───────────────────
         climate_res = req.get('https://archive-api.open-meteo.com/v1/archive', params={
             'latitude':   lat,
             'longitude':  lng,
@@ -225,13 +245,11 @@ def get_climate():
         records = []
         for i, t in enumerate(times):
             records.append({
-                'month':       t[:7],  # YYYY-MM
+                'month':       t[:7],
                 'temperature': round(temps[i], 1) if i < len(temps) and temps[i] is not None else None,
                 'rainfall':    round(rain[i],  1) if i < len(rain)  and rain[i]  is not None else None,
                 'humidity':    round(humid[i], 1) if i < len(humid) and humid[i] is not None else None,
             })
-
-        print(f"✅ Climate data fetched: {len(records)} months for {resolved_city}")
 
         return jsonify({
             'city':    resolved_city,
@@ -248,7 +266,6 @@ def get_climate():
 
 @app.route('/api/forecast', methods=['POST'])
 def forecast():
-    """Main forecasting endpoint"""
     filepath = None
 
     if 'file' not in request.files:
@@ -271,7 +288,7 @@ def forecast():
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
 
-        df_merged       = load_and_merge_sheets(filepath)
+        df_merged = load_and_merge_sheets(filepath)
 
         if not target_diseases:
             target_diseases = detect_disease_columns(df_merged)
@@ -309,13 +326,10 @@ def forecast():
         predictions_original = processor.inverse_transform_predictions(predictions_scaled, target_diseases)
 
         last_date = df_filtered['date'].max()
-        print(f"📅 Last historical date: {last_date.strftime('%Y-%m-%d')}")
-
         forecast_dates = [
             (last_date + relativedelta(months=i+1)).strftime('%Y-%m')
             for i in range(forecast_months)
         ]
-        print(f"📅 Forecast dates: {forecast_dates}")
 
         forecast_data = {
             'barangay':        barangay,
@@ -337,7 +351,6 @@ def forecast():
         try:
             if os.path.exists(filepath):
                 os.remove(filepath)
-                print(f"✅ Cleaned up file: {filepath}")
         except (PermissionError, FileNotFoundError, OSError) as e:
             print(f"⚠️ Could not delete {filepath}: {e}")
 
@@ -352,7 +365,6 @@ def forecast():
             except (PermissionError, FileNotFoundError, OSError):
                 pass
         import traceback
-        print(f"Error: {str(e)}")
         print(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
 
