@@ -11,8 +11,9 @@ import gc
 from config import Config
 from models.data_processor import DataProcessor
 from models.lstm_model import LSTMForecaster
-from smart_health_preprocessor import SmartHealthPreprocessor
-from barangay_city_detector import detect_city_from_barangays  # ✅ NEW
+from ultimate_auto_preprocessor import UltimateAutoPreprocessor  # ✅ UPDATED: Handles ALL formats
+from smart_health_preprocessor import SmartHealthPreprocessor  # Keep for fallback
+from barangay_city_detector import detect_city_from_barangays
 
 app = Flask(__name__)
 app.config.from_object(Config)
@@ -42,14 +43,40 @@ def detect_disease_columns(df):
 
 
 def load_and_merge_sheets(file_path):
+    """
+    ✅ UPDATED: Use UltimateAutoPreprocessor to handle ANY file format
+    Falls back to SmartHealthPreprocessor if ultimate fails
+    """
     try:
-        preprocessor = SmartHealthPreprocessor()
+        # Try ultimate preprocessor first (handles individual cases, long, wide, multi-barangay)
+        print("   🔄 Using UltimateAutoPreprocessor...")
+        preprocessor = UltimateAutoPreprocessor()
         df = preprocessor.process_file(file_path)
-        df = preprocessor.complete_time_series(df)
+        
+        # Complete time series (fill missing months/cells)
+        if hasattr(preprocessor, 'complete_time_series'):
+            df = preprocessor.complete_time_series(df)
+        else:
+            # Use SmartHealthPreprocessor's complete_time_series
+            smart = SmartHealthPreprocessor()
+            df = smart.complete_time_series(df)
+        
         return df
+        
     except Exception as e:
-        print(f"⚠️ Preprocessor failed, trying fallback read: {e}")
-        return pd.read_excel(file_path, sheet_name=0)
+        print(f"   ⚠️ UltimateAutoPreprocessor failed: {e}")
+        print(f"   🔄 Trying SmartHealthPreprocessor fallback...")
+        
+        try:
+            # Fallback to SmartHealthPreprocessor
+            preprocessor = SmartHealthPreprocessor()
+            df = preprocessor.process_file(file_path)
+            df = preprocessor.complete_time_series(df)
+            return df
+        except Exception as e2:
+            print(f"   ⚠️ SmartHealthPreprocessor also failed: {e2}")
+            print(f"   🔄 Final fallback: direct Excel read...")
+            return pd.read_excel(file_path, sheet_name=0)
 
 
 def resolve_city(df, filename=''):
@@ -102,6 +129,8 @@ def get_barangays():
     """
     Returns: barangays, disease_columns, city (auto-detected), city_detected flag, date range.
     If city_detected=False, frontend should show a manual city input field.
+    
+    ✅ UPDATED: Uses UltimateAutoPreprocessor to handle individual case records and all other formats
     """
     filepath = None
 
@@ -121,9 +150,25 @@ def get_barangays():
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
 
-        preprocessor = SmartHealthPreprocessor()
-        df_processed = preprocessor.process_file(filepath)
-        df_processed = preprocessor.complete_time_series(df_processed)
+        # ✅ UPDATED: Use ultimate preprocessor with fallback
+        try:
+            print("   🔄 Using UltimateAutoPreprocessor...")
+            preprocessor = UltimateAutoPreprocessor()
+            df_processed = preprocessor.process_file(filepath)
+            
+            # Complete time series
+            if hasattr(preprocessor, 'complete_time_series'):
+                df_processed = preprocessor.complete_time_series(df_processed)
+            else:
+                smart = SmartHealthPreprocessor()
+                df_processed = smart.complete_time_series(df_processed)
+                
+        except Exception as e:
+            print(f"   ⚠️ UltimateAutoPreprocessor failed: {e}")
+            print(f"   🔄 Fallback to SmartHealthPreprocessor...")
+            preprocessor = SmartHealthPreprocessor()
+            df_processed = preprocessor.process_file(filepath)
+            df_processed = preprocessor.complete_time_series(df_processed)
 
         # ── Barangays ──
         if 'barangay' in df_processed.columns:
@@ -266,6 +311,9 @@ def get_climate():
 
 @app.route('/api/forecast', methods=['POST'])
 def forecast():
+    """
+    ✅ UPDATED: Uses load_and_merge_sheets with UltimateAutoPreprocessor
+    """
     filepath = None
 
     if 'file' not in request.files:
@@ -288,6 +336,7 @@ def forecast():
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
 
+        # ✅ UPDATED: Uses UltimateAutoPreprocessor via load_and_merge_sheets
         df_merged = load_and_merge_sheets(filepath)
 
         if not target_diseases:
