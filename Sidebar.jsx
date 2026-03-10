@@ -1,75 +1,61 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Box, Typography } from '@mui/material';
+import { Box, Typography, Tooltip } from '@mui/material';
 import {
   Dashboard as DashboardIcon,
   TrendingUp as TrendingUpIcon,
   History as HistoryIcon,
   CloudUpload as CloudUploadIcon,
-  HealthAndSafety as HealthAndSafetyIcon,
   Logout as LogoutIcon,
   KeyboardArrowUp as ArrowUpIcon,
+  ViewSidebar as ViewSidebarIcon,
 } from '@mui/icons-material';
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 export const T = {
-  // Primary accent — one blue only
-  blue:         '#1B4F8A',
-  blueMid:      '#2260A8',
-  blueDim:      '#EBF1F9',
-
-  // Backgrounds
-  pageBg:       '#F4F6F8',
-  cardBg:       '#FFFFFF',
-  rowBg:        '#FAFBFC',
-
-  // Borders
-  border:       '#DDE1E7',
-  borderSoft:   '#EAECF0',
-
-  // Text
-  textHead:     '#111827',
-  textBody:     '#374151',
-  textMuted:    '#6B7280',
-  textFaint:    '#9CA3AF',
-  textDisabled: '#D1D5DB',
-
-  // Semantic — data meaning only, not decoration
-  danger:        '#B91C1C',
+  primary:       '#2563EB',
+  success:       '#22C55E',
+  pageBg:        '#F8FAFC',
+  cardBg:        '#E0F2FE',
+  neutralText:   '#64748B',
+  blue:          '#2563EB',
+  blueMid:       '#1D4ED8',
+  blueDim:       '#EFF6FF',
+  cardBg2:       '#FFFFFF',
+  border:        '#E2E8F0',
+  borderSoft:    '#F1F5F9',
+  textHead:      '#0F172A',
+  textBody:      '#1E293B',
+  textMuted:     '#64748B',
+  textFaint:     '#94A3B8',
+  textDisabled:  '#CBD5E1',
+  danger:        '#EF4444',
   dangerBg:      '#FEF2F2',
   dangerBorder:  '#FECACA',
-
-  warn:          '#92400E',
-  warnAccent:    '#D97706',
+  warn:          '#F59E0B',
   warnBg:        '#FFFBEB',
   warnBorder:    '#FDE68A',
-
-  ok:            '#166534',
+  ok:            '#22C55E',
   okBg:          '#F0FDF4',
   okBorder:      '#BBF7D0',
-
-  // Neutral bars
-  neutralBar:    '#6B7280',
-  neutralLight:  '#9CA3AF',
-
-  // Sidebar
-  sidebarBg:      '#162032',
-  sidebarHover:   'rgba(255,255,255,0.05)',
-  sidebarActive:  'rgba(255,255,255,0.08)',
-  sidebarDivider: 'rgba(255,255,255,0.06)',
-  sidebarText:    'rgba(255,255,255,0.88)',
-  sidebarSub:     'rgba(255,255,255,0.42)',
-  sidebarMute:    'rgba(255,255,255,0.20)',
-  sidebarAccent:  '#4A90D9',
-
-  // Legacy aliases used by other pages
-  increasing:    '#B91C1C',
-  decreasing:    '#166534',
-  emerald:       '#1B4F8A',
-  emeraldDark:   '#2260A8',
-  emeraldGlow:   '#EBF1F9',
-  emeraldSubtle: 'rgba(27,79,138,0.06)',
-  neutral:       '#6B7280',
-  warning:       '#D97706',
+  neutralBar:    '#64748B',
+  neutralLight:  '#94A3B8',
+  sidebarBg:      '#FFFFFF',
+  sidebarHover:   '#EFF6FF',
+  sidebarActive:  '#2563EB',
+  sidebarDivider: '#E2E8F0',
+  sidebarText:    '#1E293B',
+  sidebarSub:     '#475569',
+  sidebarMute:    '#94A3B8',
+  sidebarAccent:  '#2563EB',
+  increasing:    '#EF4444',
+  decreasing:    '#22C55E',
+  emerald:       '#2563EB',
+  emeraldDark:   '#1D4ED8',
+  emeraldGlow:   '#EFF6FF',
+  emeraldSubtle: 'rgba(37,99,235,0.06)',
+  neutral:       '#64748B',
+  warning:       '#F59E0B',
+  warnAccent:    '#F59E0B',
 };
 
 const NAV_SECTIONS = [
@@ -89,165 +75,277 @@ const NAV_SECTIONS = [
   },
 ];
 
+const PredictHealthLogo = ({ size = 30 }) => (
+  <svg width={size} height={size} viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="hg1" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stopColor="#38BDF8" />
+        <stop offset="100%" stopColor="#2563EB" />
+      </linearGradient>
+      <linearGradient id="hg2" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stopColor="#60A5FA" />
+        <stop offset="100%" stopColor="#1D4ED8" />
+      </linearGradient>
+    </defs>
+    <path d="M50 85 C50 85 15 62 15 38 C15 26 24 18 35 18 C41 18 47 21 50 26 C53 21 59 18 65 18 C76 18 85 26 85 38 C85 62 50 85 50 85Z" fill="url(#hg1)" opacity="0.9"/>
+    <path d="M50 26 C53 21 59 18 65 18 C76 18 85 26 85 38 C85 62 50 85 50 85 L50 26Z" fill="url(#hg2)" opacity="0.85"/>
+    <polyline points="20,44 32,44 37,32 42,56 47,38 52,44 64,44" stroke="white" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+    <rect x="68" y="14" width="5" height="14" rx="1.5" fill="white" opacity="0.95"/>
+    <rect x="64" y="18" width="13" height="5" rx="1.5" fill="white" opacity="0.95"/>
+  </svg>
+);
+
 const Sidebar = ({ currentPage, onNavigate, onLogout }) => {
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => {
+    const saved = localStorage.getItem('sidebarCollapsed');
+    return saved === null ? true : saved === 'true';
+  });
+
+  const toggleCollapsed = (val) => {
+    const next = typeof val === 'boolean' ? val : !collapsed;
+    setCollapsed(next);
+    localStorage.setItem('sidebarCollapsed', String(next));
+  };
+  const [menuOpen,  setMenuOpen]  = useState(false);
   const footerRef = useRef(null);
 
-  // Close menu when clicking outside
   useEffect(() => {
     const handler = (e) => {
-      if (footerRef.current && !footerRef.current.contains(e.target)) {
-        setMenuOpen(false);
-      }
+      if (footerRef.current && !footerRef.current.contains(e.target)) setMenuOpen(false);
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
   return (
-  <Box sx={{
-    width: 220,
-    minHeight: '100vh',
-    backgroundColor: T.sidebarBg,
-    display: 'flex',
-    flexDirection: 'column',
-    flexShrink: 0,
-    borderRight: `1px solid ${T.sidebarDivider}`,
-    position: 'sticky',
-    top: 0,
-    height: '100vh',
-    overflowY: 'auto',
-  }}>
-
-    {/* Logo */}
     <Box sx={{
-      display: 'flex', alignItems: 'center', gap: 1.25,
-      px: 2, pt: 2.5, pb: 2.25,
-      borderBottom: `1px solid ${T.sidebarDivider}`,
-      mb: 1,
+      width:           collapsed ? 64 : 220,
+      minHeight:       '100vh',
+      backgroundColor: T.sidebarBg,
+      display:         'flex',
+      flexDirection:   'column',
+      flexShrink:      0,
+
+      position:        'sticky',
+      top:             0,
+      height:          '100vh',
+      overflowX:       'hidden',
+      overflowY:       'auto',
+      transition:      'width 0.22s cubic-bezier(0.4,0,0.2,1)',
     }}>
+
+      {/* ── Logo — sticky at top, click → dashboard ── */}
       <Box sx={{
-        width: 34, height: 34, borderRadius: '8px',
-        backgroundColor: T.blue,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        position: 'sticky',
+        top: 0,
+        zIndex: 20,
+        backgroundColor: T.sidebarBg,
         flexShrink: 0,
-        boxShadow: `0 0 0 3px rgba(27,79,138,0.3), 0 4px 12px rgba(27,79,138,0.35)`,
       }}>
-        <HealthAndSafetyIcon sx={{ fontSize: 17, color: '#fff' }} />
-      </Box>
-      <Box>
-        <Typography sx={{ fontSize: 15.5, fontWeight: 600, color: T.sidebarText, lineHeight: 1.3 }}>
-          PredictHealth
-        </Typography>
-        <Typography sx={{ fontSize: 8, color: T.sidebarSub, letterSpacing: '0.8px', textTransform: 'uppercase', mt: '1px' }}>
-          
-        </Typography>
-      </Box>
-    </Box>
-
-    {/* Nav */}
-    <Box sx={{ flex: 1, px: 1 }}>
-      {NAV_SECTIONS.map(section => (
-        <Box key={section.label} sx={{ mb: 2.25 }}>
-          <Typography sx={{
-            fontSize: 9, fontWeight: 600, letterSpacing: '1.2px',
-            textTransform: 'uppercase', color: T.sidebarMute,
-            px: 1, mb: 0.4,
-          }}>
-            {section.label}
-          </Typography>
-
-          {section.items.map(({ Icon, text, page }) => {
-            const active = currentPage === page;
-            return (
-              <Box key={page} onClick={() => onNavigate?.(page)} sx={{
-                display: 'flex', alignItems: 'center', gap: 1,
-                px: 1.125, py: 0.9, mb: 0.25,
-                borderRadius: '7px', cursor: 'pointer', position: 'relative',
-                backgroundColor: active ? T.sidebarActive : 'transparent',
-                transition: 'background 0.13s',
-                '&:hover': { backgroundColor: active ? T.sidebarActive : T.sidebarHover },
-                '&::before': active ? {
-                  content: '""', position: 'absolute',
-                  left: 0, top: '22%', height: '56%', width: '2.5px',
-                  borderRadius: '0 2px 2px 0',
-                  backgroundColor: T.sidebarAccent,
-                } : {},
+        <Tooltip title="Go to Dashboard" placement="right">
+          <Box
+            onClick={() => onNavigate?.('dashboard')}
+            sx={{
+              display: 'flex', alignItems: 'center',
+              gap: 1.25, px: collapsed ? 0 : 2,
+              justifyContent: collapsed ? 'center' : 'flex-start',
+              minHeight: 64,
+              
+              cursor: 'pointer',
+              transition: 'background 0.13s',
+              '&:hover': { backgroundColor: T.sidebarHover },
+            }}
+          >
+            <Box sx={{ flexShrink: 0, lineHeight: 0 }}>
+              <PredictHealthLogo size={collapsed ? 28 : 30} />
+            </Box>
+            {!collapsed && (
+              <Typography sx={{
+                fontSize: 14.5, fontWeight: 700, letterSpacing: '0.3px',
+                background: 'linear-gradient(90deg, #38BDF8 0%, #2563EB 100%)',
+                WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
+                backgroundClip: 'text', userSelect: 'none', whiteSpace: 'nowrap',
               }}>
-                <Icon sx={{ fontSize: 15, flexShrink: 0, color: active ? T.sidebarText : T.sidebarSub, opacity: active ? 1 : 0.8 }} />
-                <Typography sx={{ fontSize: 12.5, fontWeight: active ? 500 : 400, color: active ? '#fff' : T.sidebarSub, letterSpacing: 0.1 }}>
-                  {text}
-                </Typography>
+                PredictHealth
+              </Typography>
+            )}
+          </Box>
+        </Tooltip>
+      </Box>
+
+      {/* ── Nav ── */}
+      <Box sx={{ flex: 1, px: collapsed ? 0.75 : 1.5, pt: 1 }}>
+
+        {/* ── Toggle icon: above nav when collapsed only ── */}
+        {collapsed && (
+          <Box sx={{ mb: 1.5, display: 'flex', justifyContent: 'center' }}>
+            <Tooltip title="Expand sidebar" placement="right">
+              <Box
+                onClick={() => toggleCollapsed(false)}
+                sx={{
+                  width: 28, height: 28, borderRadius: '6px',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  cursor: 'pointer', color: T.sidebarMute,
+                  transition: 'background 0.13s, color 0.13s',
+                  '&:hover': { backgroundColor: T.sidebarHover, color: T.sidebarAccent },
+                }}
+              >
+                <ViewSidebarIcon sx={{ fontSize: 17 }} />
               </Box>
-            );
-          })}
-        </Box>
-      ))}
-    </Box>
+            </Tooltip>
+          </Box>
+        )}
 
-    {/* Footer — click avatar to show sign out */}
+        {NAV_SECTIONS.map((section, sectionIdx) => (
+          <Box key={section.label} sx={{ mb: 2 }}>
+
+            {!collapsed ? (
+              <Box sx={{ display: 'flex', alignItems: 'center', px: 0.5, mb: 0.5 }}>
+                <Typography sx={{
+                  fontSize: 9.5, fontWeight: 600, letterSpacing: '1px',
+                  textTransform: 'uppercase', color: T.sidebarMute, flex: 1,
+                }}>
+                  {section.label}
+                </Typography>
+                {sectionIdx === 0 && (
+                  <Tooltip title="Collapse sidebar" placement="right">
+                    <Box
+                      onClick={() => toggleCollapsed(true)}
+                      sx={{
+                        width: 20, height: 20, borderRadius: '4px', flexShrink: 0,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        color: T.sidebarMute,
+                        transition: 'background 0.13s, color 0.13s',
+                        '&:hover': { backgroundColor: T.sidebarHover, color: T.sidebarAccent },
+                      }}
+                    >
+                      <ViewSidebarIcon sx={{ fontSize: 14 }} />
+                    </Box>
+                  </Tooltip>
+                )}
+              </Box>
+            ) : (
+              <Box sx={{ height: '1px', backgroundColor: T.sidebarDivider, mb: 0.75 }} />
+            )}
+
+            {section.items.map(({ Icon, text, page }, itemIdx) => {
+              const active = currentPage === page;
+
+              const item = (
+                <Box
+                  key={page}
+                  onClick={() => onNavigate?.(page)}
+                  sx={{
+                    display:        'flex',
+                    alignItems:     'center',
+                    justifyContent: collapsed ? 'center' : 'flex-start',
+                    gap:            collapsed ? 0 : 1,
+                    px:             collapsed ? 0 : 1.25,
+                    py:             0.875,
+                    mb:             0.25,
+                    borderRadius:   '8px',
+                    cursor:         'pointer',
+                    backgroundColor: active ? T.sidebarActive : 'transparent',
+                    transition:     'background 0.13s',
+                    '&:hover':      { backgroundColor: active ? T.sidebarActive : T.sidebarHover },
+                  }}
+                >
+                  <Icon sx={{ fontSize: 17, flexShrink: 0, color: active ? '#FFFFFF' : T.sidebarSub }} />
+                  {!collapsed && (
+                    <Typography sx={{
+                      fontSize: 13, fontWeight: active ? 600 : 400,
+                      color: active ? '#FFFFFF' : T.sidebarSub,
+                      whiteSpace: 'nowrap',
+                    }}>
+                      {text}
+                    </Typography>
+                  )}
+                </Box>
+              );
+
+              return collapsed
+                ? (
+                  <Tooltip key={page} title={text} placement="right" arrow
+                    componentsProps={{ tooltip: { sx: { fontSize: 12, backgroundColor: T.sidebarActive } }, arrow: { sx: { color: T.sidebarActive } } }}>
+                    {item}
+                  </Tooltip>
+                )
+                : item;
+            })}
+          </Box>
+        ))}
+      </Box>
+
+      {/* ── Footer / User ── */}
       <Box ref={footerRef} sx={{ borderTop: `1px solid ${T.sidebarDivider}`, position: 'relative' }}>
-
-        {/* Sign out popover — appears above footer */}
         {menuOpen && (
           <Box sx={{
             position: 'absolute', bottom: '100%', left: 8, right: 8, mb: 0.5,
-            backgroundColor: '#1E2E45',
-            border: '1px solid rgba(255,255,255,0.10)',
-            borderRadius: '9px',
-            overflow: 'hidden',
-            boxShadow: '0 -4px 16px rgba(0,0,0,0.25)',
+            backgroundColor: '#FFFFFF', border: `1px solid ${T.sidebarDivider}`,
+            borderRadius: '10px', overflow: 'hidden',
+            boxShadow: '0 -4px 16px rgba(0,0,0,0.08)',
           }}>
-            <Box
-              onClick={() => { setMenuOpen(false); onLogout?.(); }}
-              sx={{
-                display: 'flex', alignItems: 'center', gap: 1,
-                px: 1.5, py: 1.1, cursor: 'pointer',
-                transition: 'background 0.13s',
-                '&:hover': { backgroundColor: 'rgba(185,28,28,0.15)' },
-              }}
-            >
-              <LogoutIcon sx={{ fontSize: 14, color: '#F87171' }} />
-              <Typography sx={{ fontSize: 12.5, fontWeight: 500, color: '#F87171' }}>
-                Sign out
-              </Typography>
+            <Box onClick={() => { setMenuOpen(false); onLogout?.(); }} sx={{
+              display: 'flex', alignItems: 'center',
+              justifyContent: collapsed ? 'center' : 'flex-start',
+              gap: collapsed ? 0 : 1,
+              px: collapsed ? 0 : 1.5, py: 1.1, cursor: 'pointer',
+              transition: 'background 0.13s',
+              '&:hover': { backgroundColor: '#FEF2F2' },
+            }}>
+              <LogoutIcon sx={{ fontSize: 15, color: '#EF4444' }} />
+              {!collapsed && (
+                <Typography sx={{ fontSize: 12.5, fontWeight: 500, color: '#EF4444' }}>
+                  Sign out
+                </Typography>
+              )}
             </Box>
           </Box>
         )}
 
-        {/* User row — clickable */}
-        <Box
-          onClick={() => setMenuOpen(o => !o)}
-          sx={{
-            px: 1.75, py: 1.4,
-            display: 'flex', alignItems: 'center', gap: 1.125,
+        <Tooltip title={collapsed ? 'Admin User' : ''} placement="right">
+          <Box onClick={() => setMenuOpen(o => !o)} sx={{
+            px: collapsed ? 0 : 1.5, py: 1.25,
+            display: 'flex', alignItems: 'center',
+            justifyContent: collapsed ? 'center' : 'flex-start',
+            gap: collapsed ? 0 : 1.125,
             cursor: 'pointer', transition: 'background 0.13s',
             '&:hover': { backgroundColor: T.sidebarHover },
-          }}
-        >
-          <Box sx={{
-            width: 28, height: 28, borderRadius: '50%',
-            backgroundColor: menuOpen ? 'rgba(255,255,255,0.13)' : 'rgba(255,255,255,0.08)',
-            border: `1px solid ${menuOpen ? 'rgba(255,255,255,0.20)' : 'rgba(255,255,255,0.12)'}`,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 12, flexShrink: 0, transition: 'background 0.13s',
           }}>
-            👤
+            <Box sx={{
+              width: 30, height: 30, borderRadius: '50%', flexShrink: 0,
+              backgroundColor: '#DBEAFE',
+              border: `1.5px solid ${menuOpen ? T.primary : '#BFDBFE'}`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 13, transition: 'border 0.13s',
+            }}>
+              👤
+            </Box>
+            {!collapsed && (
+              <>
+                <Box sx={{ minWidth: 0, flex: 1 }}>
+                  <Typography sx={{
+                    fontSize: 12, fontWeight: 600, color: T.sidebarText,
+                    lineHeight: 1.3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                  }}>
+                    Admin User
+                  </Typography>
+                  <Typography sx={{
+                    fontSize: 10, color: T.sidebarMute,
+                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                  }}>
+                    admin@barangay.gov.ph
+                  </Typography>
+                </Box>
+                <ArrowUpIcon sx={{
+                  fontSize: 14, color: T.sidebarMute, flexShrink: 0,
+                  transition: 'transform 0.2s',
+                  transform: menuOpen ? 'rotate(0deg)' : 'rotate(180deg)',
+                }} />
+              </>
+            )}
           </Box>
-          <Box sx={{ minWidth: 0, flex: 1 }}>
-            <Typography sx={{ fontSize: 11.5, fontWeight: 500, color: T.sidebarText, lineHeight: 1.3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              Admin User
-            </Typography>
-            <Typography sx={{ fontSize: 9.5, color: T.sidebarMute, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              admin@barangay.gov.ph
-            </Typography>
-          </Box>
-          <ArrowUpIcon sx={{
-            fontSize: 14, color: T.sidebarMute, flexShrink: 0,
-            transition: 'transform 0.2s',
-            transform: menuOpen ? 'rotate(0deg)' : 'rotate(180deg)',
-          }} />
-        </Box>
+        </Tooltip>
       </Box>
     </Box>
   );
