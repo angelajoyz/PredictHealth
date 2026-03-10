@@ -24,7 +24,7 @@ import { getBarangays } from './services/api';
 
 // ── Shared sub-components ─────────────────────────────────────────────────────
 const SCard = ({ children, sx = {} }) => (
-  <Card sx={{ borderRadius: '10px', backgroundColor: T.cardBg, border: `1px solid ${T.border}`, boxShadow: 'none', ...sx }}>
+  <Card sx={{ borderRadius: '10px', backgroundColor: '#FFFFFF', border: `1px solid ${T.border}`, boxShadow: 'none', ...sx }}>
     {children}
   </Card>
 );
@@ -36,7 +36,7 @@ const CardHead = ({ title, icon }) => (
   </Box>
 );
 
-// ── File validation constants ─────────────────────────────────────────────────
+// ── File validation ───────────────────────────────────────────────────────────
 const MAX_FILE_SIZE_MB    = 10;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 
@@ -59,7 +59,7 @@ const formatFileSize = (bytes) =>
     ? `${(bytes / (1024 * 1024)).toFixed(2)} MB`
     : `${(bytes / 1024).toFixed(2)} KB`;
 
-// ── Animated processing indicator ────────────────────────────────────────────
+// ── Animated processing indicator ─────────────────────────────────────────────
 const STEPS = [
   'Reading file structure…',
   'Detecting barangays…',
@@ -70,78 +70,34 @@ const STEPS = [
 
 const ProcessingIndicator = ({ fileName }) => {
   const [stepIndex, setStepIndex] = React.useState(0);
-
   React.useEffect(() => {
     const id = setInterval(() => {
       setStepIndex(prev => (prev < STEPS.length - 1 ? prev + 1 : prev));
     }, 900);
     return () => clearInterval(id);
   }, []);
-
   const progress = Math.round(((stepIndex + 1) / STEPS.length) * 100);
-
   return (
-    <Box sx={{
-      p: '16px 18px',
-      borderRadius: '10px',
-      backgroundColor: T.blueDim,
-      border: `1px solid rgba(27,79,138,0.18)`,
-    }}>
-      {/* Top row */}
+    <Box sx={{ p: '16px 18px', borderRadius: '10px', backgroundColor: T.blueDim, border: `1px solid rgba(27,79,138,0.18)` }}>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25, mb: 1.5 }}>
         <CircularProgress size={14} thickness={5} sx={{ color: T.blue, flexShrink: 0 }} />
         <Typography sx={{ fontSize: 13, fontWeight: 600, color: T.blue }}>Processing file…</Typography>
-        <Typography sx={{
-          fontSize: 11, color: T.textMuted, ml: 'auto',
-          maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        }}>
+        <Typography sx={{ fontSize: 11, color: T.textMuted, ml: 'auto', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {fileName}
         </Typography>
       </Box>
-
-      {/* Progress bar */}
-      <LinearProgress
-        variant="determinate"
-        value={progress}
-        sx={{
-          mb: 1.5, height: 4, borderRadius: 4,
-          backgroundColor: 'rgba(27,79,138,0.12)',
-          '& .MuiLinearProgress-bar': {
-            backgroundColor: T.blue,
-            borderRadius: 4,
-            transition: 'transform 0.85s ease',
-          },
-        }}
-      />
-
-      {/* Step list */}
+      <LinearProgress variant="determinate" value={progress} sx={{ mb: 1.5, height: 4, borderRadius: 4, backgroundColor: 'rgba(27,79,138,0.12)', '& .MuiLinearProgress-bar': { backgroundColor: T.blue, borderRadius: 4, transition: 'transform 0.85s ease' } }} />
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
         {STEPS.map((step, i) => (
           <Box key={i} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             {i < stepIndex ? (
               <CheckCircleIcon sx={{ fontSize: 13, color: T.ok, flexShrink: 0 }} />
             ) : i === stepIndex ? (
-              <Box sx={{
-                width: 13, height: 13, borderRadius: '50%', flexShrink: 0,
-                border: `2px solid ${T.blue}`,
-                animation: 'diPulse 1s ease-in-out infinite',
-                '@keyframes diPulse': {
-                  '0%,100%': { opacity: 1 },
-                  '50%':     { opacity: 0.35 },
-                },
-              }} />
+              <Box sx={{ width: 13, height: 13, borderRadius: '50%', flexShrink: 0, border: `2px solid ${T.blue}`, animation: 'diPulse 1s ease-in-out infinite', '@keyframes diPulse': { '0%,100%': { opacity: 1 }, '50%': { opacity: 0.35 } } }} />
             ) : (
-              <Box sx={{
-                width: 13, height: 13, borderRadius: '50%', flexShrink: 0,
-                border: `1.5px solid rgba(27,79,138,0.2)`,
-              }} />
+              <Box sx={{ width: 13, height: 13, borderRadius: '50%', flexShrink: 0, border: `1.5px solid rgba(27,79,138,0.2)` }} />
             )}
-            <Typography sx={{
-              fontSize: 12,
-              fontWeight: i === stepIndex ? 600 : 400,
-              color: i < stepIndex ? T.ok : i === stepIndex ? T.blue : T.textFaint,
-              transition: 'color 0.3s',
-            }}>
+            <Typography sx={{ fontSize: 12, fontWeight: i === stepIndex ? 600 : 400, color: i < stepIndex ? T.ok : i === stepIndex ? T.blue : T.textFaint, transition: 'color 0.3s' }}>
               {step}
             </Typography>
           </Box>
@@ -151,32 +107,10 @@ const ProcessingIndicator = ({ fileName }) => {
   );
 };
 
-// ── Uniform fixed-size chip ───────────────────────────────────────────────────
+// ── Uniform chip ──────────────────────────────────────────────────────────────
 const UniChip = ({ label, color, bg, border }) => (
-  <Box sx={{
-    width: 148,
-    height: 26,
-    px: '10px',
-    borderRadius: '5px',
-    backgroundColor: bg,
-    border: `1px solid ${border}`,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
-    flexShrink: 0,
-  }}>
-    <Typography sx={{
-      fontSize: 11.5,
-      fontWeight: 500,
-      color,
-      whiteSpace: 'nowrap',
-      overflow: 'hidden',
-      textOverflow: 'ellipsis',
-      lineHeight: 1,
-      width: '100%',
-      textAlign: 'center',
-    }}>
+  <Box sx={{ width: 148, height: 26, px: '10px', borderRadius: '5px', backgroundColor: bg, border: `1px solid ${border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0 }}>
+    <Typography sx={{ fontSize: 11.5, fontWeight: 500, color, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', lineHeight: 1, width: '100%', textAlign: 'center' }}>
       {label}
     </Typography>
   </Box>
@@ -184,16 +118,8 @@ const UniChip = ({ label, color, bg, border }) => (
 
 // ── Preview stat tile ─────────────────────────────────────────────────────────
 const PreviewTile = ({ icon, label, value, color = T.blue, bg = T.blueDim, border = 'rgba(27,79,138,0.18)' }) => (
-  <Box sx={{
-    flex: 1, p: '12px 14px', borderRadius: '8px',
-    backgroundColor: bg, border: `1px solid ${border}`,
-    display: 'flex', alignItems: 'center', gap: 1.25,
-  }}>
-    <Box sx={{
-      width: 32, height: 32, borderRadius: '8px', flexShrink: 0,
-      backgroundColor: T.cardBg, display: 'flex', alignItems: 'center', justifyContent: 'center',
-      border: `1px solid ${border}`,
-    }}>
+  <Box sx={{ flex: 1, p: '12px 14px', borderRadius: '8px', backgroundColor: bg, border: `1px solid ${border}`, display: 'flex', alignItems: 'center', gap: 1.25 }}>
+    <Box sx={{ width: 32, height: 32, borderRadius: '8px', flexShrink: 0, backgroundColor: '#FFFFFF', display: 'flex', alignItems: 'center', justifyContent: 'center', border: `1px solid ${border}` }}>
       {React.cloneElement(icon, { sx: { fontSize: 16, color } })}
     </Box>
     <Box>
@@ -205,18 +131,17 @@ const PreviewTile = ({ icon, label, value, color = T.blue, bg = T.blueDim, borde
 
 // ── DataImport ────────────────────────────────────────────────────────────────
 const DataImport = ({ onNavigate, onLogout, onDataUploaded }) => {
-  const [dragActive, setDragActive]             = useState(false);
-  const [selectedFile, setSelectedFile]         = useState(null);
-  const [validationStatus, setValidationStatus] = useState(null);
-  const [validationErrors, setValidationErrors] = useState([]);
-  const [barangays, setBarangays]               = useState([]);
-  const [diseaseColumns, setDiseaseColumns]     = useState([]);
-  const [rowCount, setRowCount]                 = useState(null);
-  const [datasetCity, setDatasetCity]           = useState(null);
-
-  const [dialogType, setDialogType]   = useState(null);
-  const [pendingFile, setPendingFile] = useState(null);
-  const [dialogMeta, setDialogMeta]   = useState(null);
+  const [dragActive,        setDragActive]        = useState(false);
+  const [selectedFile,      setSelectedFile]      = useState(null);
+  const [validationStatus,  setValidationStatus]  = useState(null);
+  const [validationErrors,  setValidationErrors]  = useState([]);
+  const [barangays,         setBarangays]         = useState([]);
+  const [diseaseColumns,    setDiseaseColumns]    = useState([]);
+  const [rowCount,          setRowCount]          = useState(null);
+  const [datasetCity,       setDatasetCity]       = useState(null);
+  const [dialogType,        setDialogType]        = useState(null);
+  const [pendingFile,       setPendingFile]       = useState(null);
+  const [dialogMeta,        setDialogMeta]        = useState(null);
 
   // ── Drag handlers ─────────────────────────────────────────────────────────
   const handleDrag = (e) => {
@@ -224,17 +149,8 @@ const DataImport = ({ onNavigate, onLogout, onDataUploaded }) => {
     if (e.type === 'dragenter' || e.type === 'dragover') setDragActive(true);
     else if (e.type === 'dragleave') setDragActive(false);
   };
-
-  const handleDrop = (e) => {
-    e.preventDefault(); e.stopPropagation();
-    setDragActive(false);
-    if (e.dataTransfer.files?.[0]) trySelectFile(e.dataTransfer.files[0]);
-  };
-
-  const handleFileInput = (e) => {
-    if (e.target.files?.[0]) trySelectFile(e.target.files[0]);
-    e.target.value = '';
-  };
+  const handleDrop = (e) => { e.preventDefault(); e.stopPropagation(); setDragActive(false); if (e.dataTransfer.files?.[0]) trySelectFile(e.dataTransfer.files[0]); };
+  const handleFileInput = (e) => { if (e.target.files?.[0]) trySelectFile(e.target.files[0]); e.target.value = ''; };
 
   // ── Smart detection ───────────────────────────────────────────────────────
   const detectDialogType = async (file) => {
@@ -246,20 +162,12 @@ const DataImport = ({ onNavigate, onLogout, onDataUploaded }) => {
       const existingDiseases  = JSON.parse(localStorage.getItem('diseaseColumns') || '[]');
       const sameBarangays     = newBarangays.length === existingBarangays.length && newBarangays.every(b => existingBarangays.includes(b));
       const sameDiseases      = newDiseases.length  === existingDiseases.length  && newDiseases.every(d => existingDiseases.includes(d));
-
-      // ✅ DEBUG LOG
-      console.log('📥 API Response:', response);
-      console.log('   Barangays received:', newBarangays.length, newBarangays);
-      console.log('   Diseases received:', newDiseases.length, newDiseases);
-
       setPendingFile({ file, scannedResponse: response });
       setDialogMeta({ barangaysMatch: sameBarangays, diseasesMatch: sameDiseases });
-
       if (sameBarangays && sameDiseases)        setDialogType('extension');
       else if (!sameBarangays && !sameDiseases) setDialogType('replacement');
       else                                      setDialogType('conflict');
-    } catch (err) {
-      console.error('❌ Error detecting dialog type:', err);
+    } catch {
       setPendingFile({ file, scannedResponse: null });
       setDialogMeta({ barangaysMatch: false, diseasesMatch: false });
       setDialogType('replacement');
@@ -281,51 +189,33 @@ const DataImport = ({ onNavigate, onLogout, onDataUploaded }) => {
     ['uploadedData','cachedForecastData','cachedForecastBarangay','cachedForecastHorizon','cachedForecastDisease','dashboardSnapshot'].forEach(k => localStorage.removeItem(k));
     scannedResponse ? applyScannedResponse(file, scannedResponse) : handleFileSelection(file);
   };
-
   const handleConfirmReplace = () => {
     const { file, scannedResponse } = pendingFile; closeDialog();
     clearLocalStorageData();
     scannedResponse ? applyScannedResponse(file, scannedResponse) : handleFileSelection(file);
   };
-
   const handleConfirmConflictContinue = () => {
     const { file, scannedResponse } = pendingFile; closeDialog();
     ['uploadedData','cachedForecastData','cachedForecastBarangay','cachedForecastHorizon','cachedForecastDisease','dashboardSnapshot'].forEach(k => localStorage.removeItem(k));
     scannedResponse ? applyScannedResponse(file, scannedResponse) : handleFileSelection(file);
   };
 
-  // ── Apply pre-scanned response ────────────────────────────────────────────
   const applyScannedResponse = (file, response) => {
-    console.log('✅ Applying scanned response:', response);
-    
     setSelectedFile(file);
-    
-    // ✅ CRITICAL: Set barangays state from response
     const receivedBarangays = response.barangays || [];
-    const receivedDiseases = response.disease_columns || [];
-    
-    console.log('   Setting barangays state:', receivedBarangays.length, receivedBarangays);
-    console.log('   Setting diseases state:', receivedDiseases.length, receivedDiseases);
-    
+    const receivedDiseases  = response.disease_columns || [];
     setBarangays(receivedBarangays);
     setDiseaseColumns(receivedDiseases);
-    
     if (response.row_count != null) setRowCount(response.row_count);
     if (response.city)              setDatasetCity(response.city);
-
-    // ✅ Save to localStorage
     if (receivedBarangays.length > 0)  localStorage.setItem('availableBarangays', JSON.stringify(receivedBarangays));
     if (receivedDiseases.length > 0)   localStorage.setItem('diseaseColumns',     JSON.stringify(receivedDiseases));
     if (response.city)       localStorage.setItem('datasetCity',      response.city);
     if (response.start_date) localStorage.setItem('datasetStartDate', response.start_date);
     if (response.end_date)   localStorage.setItem('datasetEndDate',   response.end_date);
-    
     setValidationStatus('success');
-    
-    console.log('✅ State updated. barangays.length =', receivedBarangays.length);
   };
 
-  // ── Clear cached data ─────────────────────────────────────────────────────
   const clearLocalStorageData = () => {
     ['uploadedData','availableBarangays','diseaseColumns','forecastHistory',
      'cachedForecastData','cachedForecastBarangay','cachedForecastHorizon',
@@ -333,7 +223,6 @@ const DataImport = ({ onNavigate, onLogout, onDataUploaded }) => {
     ].forEach(k => localStorage.removeItem(k));
   };
 
-  // ── File selection & API scan ─────────────────────────────────────────────
   const handleFileSelection = async (file) => {
     if (!validateFileType(file)) {
       setSelectedFile(file); setValidationStatus('error');
@@ -345,247 +234,199 @@ const DataImport = ({ onNavigate, onLogout, onDataUploaded }) => {
       setValidationErrors([`File is too large (${formatFileSize(file.size)}). Maximum allowed size is ${MAX_FILE_SIZE_MB} MB.`]);
       return;
     }
-
-    setSelectedFile(file);
-    setValidationStatus('loading');
+    setSelectedFile(file); setValidationStatus('loading');
     setBarangays([]); setDiseaseColumns([]); setValidationErrors([]);
     setRowCount(null); setDatasetCity(null);
-
-    const MIN_MS = 4500;
-
     try {
-      console.log('📤 Uploading file:', file.name);
-      
-      const [response] = await Promise.all([
-        getBarangays(file),
-        new Promise(resolve => setTimeout(resolve, MIN_MS)),
-      ]);
-      
-      console.log('📥 API Response:', response);
-      console.log('   Barangays received:', response.barangays?.length, response.barangays);
-      console.log('   Diseases received:', response.disease_columns?.length, response.disease_columns);
-      
-      // ✅ CRITICAL: Set state from response
+      const [response] = await Promise.all([getBarangays(file), new Promise(r => setTimeout(r, 4500))]);
       const receivedBarangays = response.barangays || [];
-      const receivedDiseases = response.disease_columns || [];
-      
+      const receivedDiseases  = response.disease_columns || [];
       setBarangays(receivedBarangays);
       setDiseaseColumns(receivedDiseases);
-      
       if (response.row_count != null) setRowCount(response.row_count);
       if (response.city)              setDatasetCity(response.city);
-
-      // ✅ Save to localStorage
       if (receivedBarangays.length > 0)  localStorage.setItem('availableBarangays', JSON.stringify(receivedBarangays));
       if (receivedDiseases.length > 0)   localStorage.setItem('diseaseColumns',     JSON.stringify(receivedDiseases));
       if (response.city)       localStorage.setItem('datasetCity',      response.city);
       if (response.start_date) localStorage.setItem('datasetStartDate', response.start_date);
       if (response.end_date)   localStorage.setItem('datasetEndDate',   response.end_date);
-
       setValidationStatus('success');
-      
-      console.log('✅ Upload complete. barangays.length =', receivedBarangays.length);
-      
     } catch (error) {
-      console.error('❌ Upload error:', error);
       setValidationStatus('error');
       setValidationErrors([error.message]);
     }
   };
 
-  // ── Remove file ───────────────────────────────────────────────────────────
   const handleRemoveFile = () => {
     setSelectedFile(null); setValidationStatus(null); setValidationErrors([]);
     setBarangays([]); setDiseaseColumns([]); setRowCount(null); setDatasetCity(null);
     clearLocalStorageData();
   };
 
-  // ── Save and navigate ─────────────────────────────────────────────────────
   const handleSaveAndContinue = () => {
     const uploadedData = { file: selectedFile, uploadDate: new Date().toISOString() };
     if (onDataUploaded) onDataUploaded(uploadedData);
-    localStorage.setItem('uploadedData', JSON.stringify({
-      fileName: selectedFile.name, fileSize: selectedFile.size, uploadDate: uploadedData.uploadDate,
-    }));
-    onNavigate?.('prediction');
+    localStorage.setItem('uploadedData', JSON.stringify({ fileName: selectedFile.name, fileSize: selectedFile.size, uploadDate: uploadedData.uploadDate }));
+    onNavigate?.('dashboard');
   };
 
-  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <Box sx={{ display: 'flex', minHeight: '100vh', backgroundColor: T.pageBg }}>
       <Sidebar currentPage="dataimport" onNavigate={onNavigate} onLogout={onLogout} />
+      <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
 
-      <Box sx={{ flex: 1, overflow: 'auto', p: '28px 24px', minWidth: 0 }}>
-
-        <Box sx={{ mb: 2.75 }}>
-          <Typography sx={{ fontSize: 18, fontWeight: 700, color: T.textHead, letterSpacing: '-0.3px' }}>Data Import</Typography>
-          <Typography sx={{ fontSize: 12, color: T.textMuted, mt: 0.4 }}>Upload your health dataset to begin forecasting</Typography>
+        {/* Sticky header — border removed */}
+        <Box sx={{ px: '24px', minHeight: 64, display: 'flex', alignItems: 'center', backgroundColor: '#FFFFFF', position: 'sticky', top: 0, zIndex: 10, flexShrink: 0 }}>
+          <Typography sx={{ fontSize: 16, fontWeight: 700, color: T.textHead, letterSpacing: '-0.2px' }}>Data Import</Typography>
         </Box>
 
-        {/* Step 1 */}
-        <SCard sx={{ mb: '14px' }}>
-          <CardContent sx={{ p: 2.25, '&:last-child': { pb: 2.25 } }}>
-            <CardHead title="Step 1: Upload Dataset" icon={<CloudIcon sx={{ fontSize: 16 }} />} />
+        <Box sx={{ px: '24px', pt: '20px', pb: '28px', overflow: 'auto', flex: 1, display: 'flex', flexDirection: 'column' }}>
 
-            {!selectedFile ? (
-              <Box
-                onDragEnter={handleDrag} onDragOver={handleDrag}
-                onDragLeave={handleDrag} onDrop={handleDrop}
-                onClick={() => document.getElementById('file-input').click()}
-                sx={{
-                  border: `2px dashed ${dragActive ? T.blue : T.borderSoft}`,
-                  borderRadius: '10px', p: '48px 24px', textAlign: 'center',
-                  backgroundColor: dragActive ? T.blueDim : T.rowBg,
-                  cursor: 'pointer', transition: 'all 0.2s',
-                  '&:hover': { borderColor: T.blue, backgroundColor: T.blueDim },
-                }}>
-                <CloudUploadIcon sx={{ fontSize: 48, color: dragActive ? T.blue : T.textFaint, mb: 1.5 }} />
-                <Typography sx={{ fontSize: 13.5, fontWeight: 600, color: T.textHead, mb: 0.5 }}>Drag and drop your file here</Typography>
-                <Typography sx={{ fontSize: 12, color: T.textMuted, mb: 0.5 }}>or click to browse</Typography>
-                <Typography sx={{ fontSize: 11, color: T.textFaint }}>Supported formats: .xlsx, .xls, .csv · Max size: {MAX_FILE_SIZE_MB} MB</Typography>
-                <input id="file-input" type="file" accept=".xlsx,.xls,.csv" onChange={handleFileInput} style={{ display: 'none' }} />
-              </Box>
-            ) : (
-              <Box>
-                {/* File row */}
-                <Box sx={{
-                  display: 'flex', alignItems: 'center', gap: 1.5, p: '10px 14px',
-                  borderRadius: '8px', backgroundColor: T.rowBg, border: `1px solid ${T.borderSoft}`, mb: 1.5,
-                }}>
-                  <FileIcon sx={{ fontSize: 20, color: T.blue, flexShrink: 0 }} />
-                  <Box sx={{ flex: 1, minWidth: 0 }}>
-                    <Typography sx={{ fontSize: 13, fontWeight: 600, color: T.textHead, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                      {selectedFile.name}
-                    </Typography>
-                    <Typography sx={{ fontSize: 11, color: selectedFile.size > MAX_FILE_SIZE_BYTES * 0.8 ? T.warnAccent : T.textMuted }}>
-                      {formatFileSize(selectedFile.size)}
-                      {selectedFile.size > MAX_FILE_SIZE_BYTES * 0.8 && selectedFile.size <= MAX_FILE_SIZE_BYTES && ' · near size limit'}
-                    </Typography>
+          {/* Step 1 */}
+          <SCard sx={{ mb: '14px', flex: validationStatus !== 'success' ? 1 : 'none', display: 'flex', flexDirection: 'column' }}>
+            <CardContent sx={{ p: 2.25, '&:last-child': { pb: 2.25 }, flex: 1, display: 'flex', flexDirection: 'column' }}>
+              <CardHead title="Step 1: Upload Dataset" icon={<CloudIcon sx={{ fontSize: 16 }} />} />
+
+              {!selectedFile ? (
+                <Box
+                  onDragEnter={handleDrag} onDragOver={handleDrag} onDragLeave={handleDrag} onDrop={handleDrop}
+                  onClick={() => document.getElementById('file-input').click()}
+                  sx={{
+                    flex: 1,
+                    border: `2px dashed ${dragActive ? T.blue : T.borderSoft}`,
+                    borderRadius: '10px', p: '24px',
+                    textAlign: 'center',
+                    backgroundColor: dragActive ? T.blueDim : T.pageBg,
+                    cursor: 'pointer', transition: 'all 0.2s',
+                    display: 'flex', flexDirection: 'column',
+                    alignItems: 'center', justifyContent: 'center',
+                    '&:hover': { borderColor: T.blue, backgroundColor: T.blueDim },
+                  }}>
+                  <CloudUploadIcon sx={{ fontSize: 48, color: dragActive ? T.blue : T.textFaint, mb: 1.5 }} />
+                  <Typography sx={{ fontSize: 13.5, fontWeight: 600, color: T.textHead, mb: 0.5 }}>Drag and drop your file here</Typography>
+                  <Typography sx={{ fontSize: 12, color: T.textMuted, mb: 0.5 }}>or click to browse</Typography>
+                  <Typography sx={{ fontSize: 11, color: T.textFaint }}>Supported formats: .xlsx, .xls, .csv · Max size: {MAX_FILE_SIZE_MB} MB</Typography>
+                  <input id="file-input" type="file" accept=".xlsx,.xls,.csv" onChange={handleFileInput} style={{ display: 'none' }} />
+                </Box>
+              ) : (
+                <Box>
+                  {/* File row */}
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, p: '10px 14px', borderRadius: '8px', backgroundColor: T.pageBg, border: `1px solid ${T.borderSoft}`, mb: 1.5 }}>
+                    <FileIcon sx={{ fontSize: 20, color: T.blue, flexShrink: 0 }} />
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      <Typography sx={{ fontSize: 13, fontWeight: 600, color: T.textHead, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {selectedFile.name}
+                      </Typography>
+                      <Typography sx={{ fontSize: 11, color: selectedFile.size > MAX_FILE_SIZE_BYTES * 0.8 ? T.warnAccent : T.textMuted }}>
+                        {formatFileSize(selectedFile.size)}
+                        {selectedFile.size > MAX_FILE_SIZE_BYTES * 0.8 && selectedFile.size <= MAX_FILE_SIZE_BYTES && ' · near size limit'}
+                      </Typography>
+                    </Box>
+                    {validationStatus !== 'loading' && (
+                      <Box onClick={handleRemoveFile} sx={{ cursor: 'pointer', p: 0.5, borderRadius: '4px', color: T.textMuted, '&:hover': { color: T.danger, backgroundColor: T.dangerBg } }}>
+                        <CloseIcon sx={{ fontSize: 16 }} />
+                      </Box>
+                    )}
                   </Box>
-                  {validationStatus !== 'loading' && (
-                    <Box onClick={handleRemoveFile}
-                      sx={{ cursor: 'pointer', p: 0.5, borderRadius: '4px', color: T.textMuted, '&:hover': { color: T.danger, backgroundColor: T.dangerBg } }}>
-                      <CloseIcon sx={{ fontSize: 16 }} />
+
+                  {validationStatus === 'loading' && <ProcessingIndicator fileName={selectedFile.name} />}
+
+                  {validationStatus === 'error' && (
+                    <Box sx={{ p: '10px 14px', borderRadius: '8px', backgroundColor: T.dangerBg, border: `1px solid ${T.dangerBorder}` }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+                        <ErrorIcon sx={{ fontSize: 15, color: T.danger }} />
+                        <Typography sx={{ fontSize: 12.5, fontWeight: 600, color: T.danger }}>Validation Failed</Typography>
+                      </Box>
+                      {validationErrors.map((err, i) => (
+                        <Typography key={i} sx={{ fontSize: 12, color: T.danger, pl: 3 }}>• {err}</Typography>
+                      ))}
+                    </Box>
+                  )}
+
+                  {validationStatus === 'success' && (
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, p: '9px 14px', borderRadius: '8px', backgroundColor: T.okBg, border: `1px solid ${T.okBorder}` }}>
+                      <CheckCircleIcon sx={{ fontSize: 15, color: T.ok, flexShrink: 0 }} />
+                      <Typography sx={{ fontSize: 12.5, color: T.ok, fontWeight: 500 }}>
+                        File validated successfully — found {barangays.length} barangay{barangays.length !== 1 ? 's' : ''}, {diseaseColumns.length} disease type{diseaseColumns.length !== 1 ? 's' : ''}.
+                      </Typography>
                     </Box>
                   )}
                 </Box>
+              )}
+            </CardContent>
+          </SCard>
 
-                {/* ── ANIMATED LOADING ── */}
-                {validationStatus === 'loading' && <ProcessingIndicator fileName={selectedFile.name} />}
+          {/* Step 2 */}
+          {validationStatus === 'success' && (
+            <SCard sx={{ mb: '14px' }}>
+              <CardContent sx={{ p: 2.25, '&:last-child': { pb: 2.25 } }}>
+                <CardHead title="Step 2: Dataset Summary" icon={<StorageIcon sx={{ fontSize: 16 }} />} />
 
-                {/* Error */}
-                {validationStatus === 'error' && (
-                  <Box sx={{ p: '10px 14px', borderRadius: '8px', backgroundColor: T.dangerBg, border: `1px solid ${T.dangerBorder}` }}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
-                      <ErrorIcon sx={{ fontSize: 15, color: T.danger }} />
-                      <Typography sx={{ fontSize: 12.5, fontWeight: 600, color: T.danger }}>Validation Failed</Typography>
-                    </Box>
-                    {validationErrors.map((err, i) => (
-                      <Typography key={i} sx={{ fontSize: 12, color: T.danger, pl: 3 }}>• {err}</Typography>
-                    ))}
-                  </Box>
-                )}
+                <Box sx={{ display: 'flex', gap: '10px', mb: 2, flexWrap: 'wrap' }}>
+                  {datasetCity && (
+                    <PreviewTile icon={<CityIcon />} label="City / Municipality" value={datasetCity} color="#7c3aed" bg="rgba(124,58,237,0.07)" border="rgba(124,58,237,0.2)" />
+                  )}
+                  <PreviewTile icon={<LocationIcon />} label="Barangays found"  value={barangays.length}     color={T.blue}       bg={T.blueDim} border="rgba(27,79,138,0.18)" />
+                  <PreviewTile icon={<BiotechIcon />}  label="Disease types"    value={diseaseColumns.length} color={T.ok}         bg={T.okBg}    border={T.okBorder} />
+                  {rowCount != null && (
+                    <PreviewTile icon={<StorageIcon />} label="Data records" value={rowCount.toLocaleString()} color={T.warnAccent} bg={T.warnBg} border={T.warnBorder} />
+                  )}
+                </Box>
 
-                {/* Success */}
-                {validationStatus === 'success' && (
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, p: '9px 14px', borderRadius: '8px', backgroundColor: T.okBg, border: `1px solid ${T.okBorder}` }}>
-                    <CheckCircleIcon sx={{ fontSize: 15, color: T.ok, flexShrink: 0 }} />
-                    <Typography sx={{ fontSize: 12.5, color: T.ok, fontWeight: 500 }}>
-                      File validated successfully — found {barangays.length} barangay{barangays.length !== 1 ? 's' : ''}, {diseaseColumns.length} disease type{diseaseColumns.length !== 1 ? 's' : ''}.
+                {barangays.length > 0 && (
+                  <Box sx={{ mb: 1.75 }}>
+                    <Typography sx={{ fontSize: 11.5, fontWeight: 600, color: T.textMuted, mb: 0.75, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                      Barangays in dataset ({barangays.length})
                     </Typography>
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                      {barangays.map(b => <UniChip key={b} label={b} color={T.textBody} bg={T.pageBg} border={T.borderSoft} />)}
+                    </Box>
                   </Box>
                 )}
-              </Box>
-            )}
-          </CardContent>
-        </SCard>
 
-        {/* Step 2 */}
-        {validationStatus === 'success' && (
-          <SCard sx={{ mb: '14px' }}>
-            <CardContent sx={{ p: 2.25, '&:last-child': { pb: 2.25 } }}>
-              <CardHead title="Step 2: Dataset Summary" icon={<StorageIcon sx={{ fontSize: 16 }} />} />
-
-              {/* Stat tiles */}
-              <Box sx={{ display: 'flex', gap: '10px', mb: 2, flexWrap: 'wrap' }}>
-                {datasetCity && (
-                  <PreviewTile
-                    icon={<CityIcon />}
-                    label="City / Municipality"
-                    value={datasetCity}
-                    color="#7c3aed"
-                    bg="rgba(124,58,237,0.07)"
-                    border="rgba(124,58,237,0.2)"
-                  />
+                {diseaseColumns.length > 0 && (
+                  <Box sx={{ mb: 1.75 }}>
+                    <Typography sx={{ fontSize: 11.5, fontWeight: 600, color: T.textMuted, mb: 0.75, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                      Detected disease types ({diseaseColumns.length})
+                    </Typography>
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                      {diseaseColumns.map(col => (
+                        <UniChip key={col}
+                          label={col}
+                          color={T.blue} bg={T.blueDim} border="rgba(27,79,138,0.2)"
+                        />
+                      ))}
+                    </Box>
+                  </Box>
                 )}
-                <PreviewTile icon={<LocationIcon />} label="Barangays found"  value={barangays.length}          color={T.blue}      bg={T.blueDim} border="rgba(27,79,138,0.18)" />
-                <PreviewTile icon={<BiotechIcon />}  label="Disease types"    value={diseaseColumns.length}      color={T.ok}        bg={T.okBg}    border={T.okBorder} />
-                {rowCount != null && (
-                  <PreviewTile icon={<StorageIcon />} label="Data records" value={rowCount.toLocaleString()} color={T.warnAccent} bg={T.warnBg} border={T.warnBorder} />
-                )}
-              </Box>
 
-              {/* Barangay chips — all same size */}
-              {barangays.length > 0 && (
-                <Box sx={{ mb: 1.75 }}>
-                  <Typography sx={{ fontSize: 11.5, fontWeight: 600, color: T.textMuted, mb: 0.75, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                    Barangays in dataset ({barangays.length})
+                <Box sx={{ p: '10px 14px', borderRadius: '8px', backgroundColor: T.blueDim, border: `1px solid rgba(27,79,138,0.18)`, display: 'flex', alignItems: 'flex-start', gap: 1 }}>
+                  <LocationIcon sx={{ fontSize: 14, color: T.blue, mt: '2px', flexShrink: 0 }} />
+                  <Typography sx={{ fontSize: 12, color: T.blue, lineHeight: 1.6 }}>
+                    You'll choose a specific barangay and generate forecasts from the <strong>Dashboard</strong> after saving your dataset here.
                   </Typography>
-                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                    {barangays.map(b => (
-                      <UniChip key={b} label={b} color={T.textBody} bg={T.rowBg} border={T.borderSoft} />
-                    ))}
-                  </Box>
                 </Box>
-              )}
+              </CardContent>
+            </SCard>
+          )}
 
-              {/* Disease chips — all same size */}
-              {diseaseColumns.length > 0 && (
-                <Box sx={{ mb: 1.75 }}>
-                  <Typography sx={{ fontSize: 11.5, fontWeight: 600, color: T.textMuted, mb: 0.75, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                    Detected disease types ({diseaseColumns.length})
-                  </Typography>
-                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                    {diseaseColumns.map(col => (
-                      <UniChip
-                        key={col}
-                        label={col.replace(/_cases$/, '').replace(/_prevalence_pct$/, ' %').replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
-                        color={T.blue}
-                        bg={T.blueDim}
-                        border="rgba(27,79,138,0.2)"
-                      />
-                    ))}
-                  </Box>
-                </Box>
-              )}
-
-              <Box sx={{ p: '10px 14px', borderRadius: '8px', backgroundColor: T.blueDim, border: `1px solid rgba(27,79,138,0.18)`, display: 'flex', alignItems: 'flex-start', gap: 1 }}>
-                <LocationIcon sx={{ fontSize: 14, color: T.blue, mt: '2px', flexShrink: 0 }} />
-                <Typography sx={{ fontSize: 12, color: T.blue, lineHeight: 1.6 }}>
-                  You'll choose a specific barangay or view <strong>All Barangays</strong> on the Prediction page after saving your dataset here.
+          {/* Step 3 */}
+          {validationStatus === 'success' && (
+            <SCard>
+              <CardContent sx={{ p: 2.25, '&:last-child': { pb: 2.25 } }}>
+                <CardHead title="Step 3: Save & Continue" icon={<CloudDoneIcon sx={{ fontSize: 16 }} />} />
+                <Button variant="contained" size="large" fullWidth onClick={handleSaveAndContinue}
+                  sx={{ backgroundColor: T.blue, color: '#fff', textTransform: 'none', fontWeight: 600, fontSize: 13.5, borderRadius: '8px', py: 1.25, boxShadow: '0 2px 10px rgba(27,79,138,0.25)', '&:hover': { backgroundColor: T.blueMid, boxShadow: '0 3px 14px rgba(27,79,138,0.32)' } }}>
+                  Save & Go to Dashboard
+                </Button>
+                <Typography sx={{ fontSize: 11.5, color: T.textFaint, textAlign: 'center', mt: 1.5 }}>
+                  Your dataset will be saved — generate forecasts from the Dashboard
                 </Typography>
-              </Box>
-            </CardContent>
-          </SCard>
-        )}
+              </CardContent>
+            </SCard>
+          )}
 
-        {/* Step 3 */}
-        {validationStatus === 'success' && (
-          <SCard>
-            <CardContent sx={{ p: 2.25, '&:last-child': { pb: 2.25 } }}>
-              <CardHead title="Step 3: Save & Continue" icon={<CloudDoneIcon sx={{ fontSize: 16 }} />} />
-              <Button variant="contained" size="large" fullWidth onClick={handleSaveAndContinue}
-                endIcon={<ArrowForwardIcon sx={{ fontSize: 17 }} />}
-                sx={{ backgroundColor: T.blue, color: '#fff', textTransform: 'none', fontWeight: 600, fontSize: 13.5, borderRadius: '8px', py: 1.25, boxShadow: '0 2px 10px rgba(27,79,138,0.25)', '&:hover': { backgroundColor: T.blueMid, boxShadow: '0 3px 14px rgba(27,79,138,0.32)' } }}>
-                Save & Go to Prediction
-              </Button>
-              <Typography sx={{ fontSize: 11.5, color: T.textFaint, textAlign: 'center', mt: 1.5 }}>
-                Your dataset will be saved — select barangay and generate forecasts on the next page
-              </Typography>
-            </CardContent>
-          </SCard>
-        )}
-
+        </Box>
       </Box>
 
       {/* Smart Dataset Dialog */}
