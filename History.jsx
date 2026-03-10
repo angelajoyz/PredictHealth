@@ -1,732 +1,416 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
+import ReactDOM from 'react-dom';
 import {
   Box, Typography, Card, CardContent, Button,
-  Chip, Table, TableBody, TableCell, TableContainer,
-  TableHead, TableRow, Select, MenuItem,
-  Switch, FormControlLabel, Alert, CircularProgress,
-  Tooltip, IconButton,
+  Chip, IconButton,
 } from '@mui/material';
 import {
-  TrendingUp as TrendingUpIcon,
-  TrendingDown as TrendingDownIcon,
-  Remove as RemoveIcon,
-  LocalHospital as MedicalIcon,
-  InfoOutlined as InfoOutlinedIcon,
-  Thermostat as ThermostatIcon,
-  WaterDrop as WaterDropIcon,
-  Air as AirIcon,
-  Refresh as RefreshIcon,
-  Download as DownloadIcon,
-  GridOn as GridOnIcon,
-  BarChart as BarChartIcon,
-  ShowChart as ShowChartIcon,
   History as HistoryIcon,
+  CheckCircle as CheckCircleIcon,
+  CalendarMonth as CalendarMonthIcon,
+  KeyboardArrowDown as ArrowDownIcon,
+  Close as CloseIcon,
+  FileDownload as FileDownloadIcon,
+  InsertDriveFile as FileIcon,
+  Psychology as PsychologyIcon,
 } from '@mui/icons-material';
-import {
-  ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid,
-  Tooltip as RechartsTooltip, Legend, ResponsiveContainer,
-  BarChart,
-} from 'recharts';
+import { useRef } from 'react';
 import Sidebar, { T } from './Sidebar';
 
-// ── Disease config ─────────────────────────────────────────────────────────────
-const DISEASE_COLORS = {
-  dengue_cases:                T.blue,
-  diarrhea_cases:              '#0EA5E9',
-  respiratory_cases:           T.danger,
-  malnutrition_cases:          T.warnAccent,
-  malnutrition_prevalence_pct: '#F59E0B',
-  hypertension_cases:          '#8B5CF6',
-  diabetes_cases:              '#EC4899',
+// ── Helpers ───────────────────────────────────────────────────────────────────
+const DISEASE_DISPLAY_MAP = {
+  dengue_cases:                'Dengue',
+  diarrhea_cases:              'Diarrhea',
+  respiratory_cases:           'Respiratory',
+  malnutrition_cases:          'Malnutrition',
+  malnutrition_prevalence_pct: 'Malnutrition %',
+  hypertension_cases:          'Hypertension',
+  diabetes_cases:              'Diabetes',
 };
 
-const MONTH_LABELS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-
-const getDiseaseInfo = (col) => {
-  const map = {
-    dengue_cases:                { label: 'Dengue',         icon: '🦟' },
-    diarrhea_cases:              { label: 'Diarrhea',       icon: '💧' },
-    respiratory_cases:           { label: 'Respiratory',    icon: '🫁' },
-    malnutrition_cases:          { label: 'Malnutrition',   icon: '⚕️' },
-    malnutrition_prevalence_pct: { label: 'Malnutrition %', icon: '⚕️' },
-    hypertension_cases:          { label: 'Hypertension',   icon: '❤️' },
-    diabetes_cases:              { label: 'Diabetes',       icon: '🩸' },
-  };
-  if (map[col]) return map[col];
-  const label = col
+const getDiseaseLabel = (col) => {
+  if (DISEASE_DISPLAY_MAP[col]) return DISEASE_DISPLAY_MAP[col];
+  return col
     .replace(/_cases$/, '')
     .replace(/_prevalence_pct$/, ' %')
     .replace(/_/g, ' ')
     .replace(/\b\w/g, l => l.toUpperCase());
-  return { label, icon: '🏥' };
 };
 
-const getDiseaseColor = (col) => DISEASE_COLORS[col] || T.neutralBar;
+const MONTH_NAMES = [
+  'January','February','March','April','May','June',
+  'July','August','September','October','November','December',
+];
 
-// ── Trend helpers ──────────────────────────────────────────────────────────────
-const trendColor  = (t) => t === 'increasing' ? T.danger    : t === 'decreasing' ? T.ok      : T.textMuted;
-const trendBg     = (t) => t === 'increasing' ? T.dangerBg  : t === 'decreasing' ? T.okBg    : '#F9FAFB';
-const trendBorder = (t) => t === 'increasing' ? T.dangerBorder : t === 'decreasing' ? T.okBorder : T.borderSoft;
-
-const TrendTag = ({ trend }) => {
-  const labels = { increasing: '↑ Increasing', decreasing: '↓ Decreasing', stable: '— Stable' };
-  return (
-    <Chip label={labels[trend] || '— Stable'} size="small" sx={{
-      backgroundColor: trendBg(trend), color: trendColor(trend),
-      border: `1px solid ${trendBorder(trend)}`,
-      fontWeight: 500, fontSize: 10.5, borderRadius: '4px', height: 20,
-    }} />
-  );
+const formatMonthLabel = (period) => {
+  if (!period) return period;
+  const m = period.match(/^(\d{4})-(\d{2})/);
+  if (m) return MONTH_NAMES[parseInt(m[2], 10) - 1] ?? period;
+  return period;
 };
 
-// ── Shared sub-components ──────────────────────────────────────────────────────
+const getPeriodYear = (period) => {
+  const m = period?.match(/^(\d{4})/);
+  return m ? m[1] : null;
+};
+
+// ── Sub-components ────────────────────────────────────────────────────────────
 const SCard = ({ children, sx = {} }) => (
-  <Card sx={{ borderRadius: '10px', backgroundColor: T.cardBg, border: `1px solid ${T.border}`, boxShadow: 'none', ...sx }}>
+  <Card sx={{ borderRadius: '10px', backgroundColor: '#FFFFFF', border: `1px solid ${T.border}`, boxShadow: 'none', ...sx }}>
     {children}
   </Card>
 );
 
-const CardHead = ({ title, icon, right }) => (
-  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', pb: 1.5, mb: 1.5, borderBottom: `1px solid ${T.borderSoft}` }}>
-    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-      {icon && <Box sx={{ color: T.blue, display: 'flex', alignItems: 'center' }}>{icon}</Box>}
-      <Typography sx={{ fontSize: 13, fontWeight: 600, color: T.textHead }}>{title}</Typography>
+// ── Year Picker (portal popup, same style as Prediction) ──────────────────────
+const YearPicker = ({ availableYears, selectedYear, onSelect }) => {
+  const [popupOpen, setPopupOpen] = useState(false);
+  const popupRef = useRef(null);
+  const btnRef   = useRef(null);
+
+  useEffect(() => {
+    const handler = (e) => {
+      if (popupRef.current && !popupRef.current.contains(e.target) &&
+          btnRef.current   && !btnRef.current.contains(e.target)) {
+        setPopupOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  return (
+    <Box>
+      <Button
+        ref={btnRef}
+        size="small"
+        onClick={() => setPopupOpen(o => !o)}
+        startIcon={<CalendarMonthIcon sx={{ fontSize: 13 }} />}
+        sx={{
+          textTransform: 'none', fontSize: 12, fontWeight: 600,
+          color: popupOpen ? T.blue : T.textBody,
+          border: `1.5px solid ${popupOpen ? T.blue : T.border}`,
+          borderRadius: '8px', px: 1.75, py: '5px',
+          backgroundColor: popupOpen ? T.blueDim : '#FFFFFF',
+          '&:hover': { borderColor: T.blue, color: T.blue, backgroundColor: T.blueDim },
+        }}>
+        {selectedYear || 'All Years'}
+      </Button>
+
+      {popupOpen && ReactDOM.createPortal(
+        <>
+          <Box onClick={() => setPopupOpen(false)} sx={{ position: 'fixed', inset: 0, zIndex: 1399, backgroundColor: 'rgba(0,0,0,0.28)' }} />
+          <Box ref={el => { popupRef.current = el; }} sx={{
+            position: 'fixed', top: '50%', left: '50%',
+            transform: 'translate(-50%, -50%)',
+            zIndex: 1400, backgroundColor: '#FFFFFF',
+            border: `1px solid ${T.border}`, borderRadius: '14px',
+            boxShadow: '0 16px 48px rgba(0,0,0,0.18)',
+            width: 340,
+            display: 'flex', flexDirection: 'column', overflow: 'hidden',
+          }}>
+            {/* Header */}
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 2.5, py: 1.75, borderBottom: `1px solid ${T.borderSoft}`, backgroundColor: T.pageBg, flexShrink: 0 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <CalendarMonthIcon sx={{ fontSize: 13, color: T.blue }} />
+                <Typography sx={{ fontSize: 13, fontWeight: 700, color: T.textHead }}>Select Year</Typography>
+                {selectedYear && (
+                  <Box sx={{ px: 1, py: 0.2, borderRadius: '4px', backgroundColor: T.blueDim, border: `1px solid rgba(27,79,138,0.2)` }}>
+                    <Typography sx={{ fontSize: 10.5, fontWeight: 600, color: T.blue }}>{selectedYear}</Typography>
+                  </Box>
+                )}
+              </Box>
+              <IconButton size="small" onClick={() => setPopupOpen(false)}
+                sx={{ p: 0.4, color: T.textMuted, '&:hover': { color: T.textHead, backgroundColor: T.borderSoft } }}>
+                <CloseIcon sx={{ fontSize: 15 }} />
+              </IconButton>
+            </Box>
+
+            {/* Year grid */}
+            <Box sx={{ p: 2.5 }}>
+              {availableYears.length === 0 ? (
+                <Typography sx={{ fontSize: 12, color: T.textMuted, textAlign: 'center', py: 1 }}>
+                  No years available. Import data first.
+                </Typography>
+              ) : (
+                <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
+                  {/* All Years tile */}
+                  <Box
+                    onClick={() => { onSelect(null); setPopupOpen(false); }}
+                    sx={{
+                      py: '10px', px: 1, borderRadius: '8px',
+                      border: `1.5px solid ${!selectedYear ? T.blue : T.border}`,
+                      backgroundColor: !selectedYear ? T.blueDim : '#FFFFFF',
+                      cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px',
+                      transition: 'all 0.13s', userSelect: 'none',
+                      '&:hover': { borderColor: T.blue, backgroundColor: !selectedYear ? T.blueDim : 'rgba(27,79,138,0.04)' },
+                    }}>
+                    {!selectedYear
+                      ? <CheckCircleIcon sx={{ fontSize: 11, color: T.blue, flexShrink: 0 }} />
+                      : <CalendarMonthIcon sx={{ fontSize: 11, color: T.textMuted, flexShrink: 0 }} />
+                    }
+                    <Typography sx={{ fontSize: 11.5, fontWeight: !selectedYear ? 600 : 400, color: !selectedYear ? T.blue : T.textBody }}>
+                      All Years
+                    </Typography>
+                  </Box>
+                  {availableYears.map(yr => {
+                    const isSelected = selectedYear === yr;
+                    return (
+                      <Box key={yr}
+                        onClick={() => { onSelect(yr); setPopupOpen(false); }}
+                        sx={{
+                          py: '10px', px: 1, borderRadius: '8px',
+                          border: `1.5px solid ${isSelected ? T.blue : T.border}`,
+                          backgroundColor: isSelected ? T.blueDim : '#FFFFFF',
+                          cursor: 'pointer',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px',
+                          transition: 'all 0.13s', userSelect: 'none',
+                          '&:hover': { borderColor: T.blue, backgroundColor: isSelected ? T.blueDim : 'rgba(27,79,138,0.04)' },
+                        }}>
+                        {isSelected
+                          ? <CheckCircleIcon sx={{ fontSize: 11, color: T.blue, flexShrink: 0 }} />
+                          : <CalendarMonthIcon sx={{ fontSize: 11, color: T.textMuted, flexShrink: 0 }} />
+                        }
+                        <Typography sx={{ fontSize: 11.5, fontWeight: isSelected ? 600 : 400, color: isSelected ? T.blue : T.textBody }}>
+                          {yr}
+                        </Typography>
+                      </Box>
+                    );
+                  })}
+                </Box>
+              )}
+            </Box>
+
+            {/* Footer */}
+            <Box sx={{ px: 2.5, py: 1.75, borderTop: `1px solid ${T.borderSoft}`, display: 'flex', justifyContent: 'flex-end', backgroundColor: T.pageBg, flexShrink: 0 }}>
+              <Button size="small" onClick={() => setPopupOpen(false)}
+                sx={{ textTransform: 'none', fontSize: 12, color: T.textMuted, border: `1px solid ${T.border}`, borderRadius: '7px', px: 1.75, py: 0.5, backgroundColor: '#FFF', '&:hover': { backgroundColor: T.borderSoft } }}>
+                Close
+              </Button>
+            </Box>
+          </Box>
+        </>
+      , document.body)}
     </Box>
-    {right}
-  </Box>
-);
-
-const Tag = ({ label, bg, color, border }) => (
-  <Chip label={label} size="small" sx={{
-    backgroundColor: bg, color, border: `1px solid ${border}`,
-    fontWeight: 500, fontSize: 10.5, borderRadius: '4px', height: 20,
-  }} />
-);
-
-const tooltipStyle = {
-  borderRadius: '8px', border: `1px solid ${T.border}`,
-  boxShadow: '0 4px 12px rgba(0,0,0,0.08)', fontSize: 12, color: T.textBody, background: T.cardBg,
+  );
 };
 
-const LabelSx = { fontSize: 11, fontWeight: 600, color: T.textMuted, mb: 0.5 };
-const SelectSx = {
-  minWidth: 150, backgroundColor: T.cardBg, borderRadius: '8px', fontSize: 13,
-  '& .MuiOutlinedInput-notchedOutline': { borderColor: T.border },
-  '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: T.blue },
+// ── Export dropdown ────────────────────────────────────────────────────────────
+const ExportMenu = ({ rows, availableDiseases }) => {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const disabled = rows.length === 0;
+
+  const doExport = (format) => {
+    setOpen(false);
+    if (format === 'csv') {
+      const headers = ['Barangay', 'Year', 'Month', 'Illness', 'Total Patients'];
+      const csvRows = rows.map(r => [r.barangay, r.year, r.month, r.illness, r.total].map(v => `"${v}"`).join(','));
+      const blob = new Blob([[headers.join(','), ...csvRows].join('\n')], { type: 'text/csv;charset=utf-8;' });
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href = url; a.download = `history_${new Date().toISOString().slice(0, 10)}.csv`; a.click();
+      URL.revokeObjectURL(url);
+    } else {
+      const lines = ['PREDICTHEALTH — HISTORY REPORT', '='.repeat(52)];
+      lines.push(`Generated : ${new Date().toLocaleDateString('en-PH', { dateStyle: 'long' })}`, '');
+      lines.push(['Barangay', 'Year', 'Month', 'Illness', 'Total Patients'].join(' | '));
+      lines.push('-'.repeat(52));
+      rows.forEach(r => lines.push([r.barangay, r.year, r.month, r.illness, r.total].join(' | ')));
+      const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8;' });
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href = url; a.download = `history_${new Date().toISOString().slice(0, 10)}.txt`; a.click();
+      URL.revokeObjectURL(url);
+    }
+  };
+
+  return (
+    <Box ref={ref} sx={{ position: 'relative', flexShrink: 0 }}>
+      <Button
+        onClick={() => !disabled && setOpen(o => !o)}
+        disabled={disabled}
+        startIcon={<FileDownloadIcon sx={{ fontSize: 14 }} />}
+        endIcon={<ArrowDownIcon sx={{ fontSize: 13, transition: 'transform 0.2s', transform: open ? 'rotate(180deg)' : 'none' }} />}
+        sx={{
+          textTransform: 'none', fontSize: 12, fontWeight: 500,
+          color: T.textMuted, backgroundColor: '#FFFFFF',
+          border: `1px solid ${T.border}`, borderRadius: '8px', px: 1.5, py: '6px',
+          '&:hover': { backgroundColor: T.borderSoft, borderColor: T.blue, color: T.blue },
+          '&:disabled': { opacity: 0.4 },
+        }}>
+        Export
+      </Button>
+      {open && (
+        <Box sx={{ position: 'fixed', zIndex: 1400, backgroundColor: '#FFFFFF', border: `1px solid ${T.border}`, borderRadius: '10px', boxShadow: '0 8px 24px rgba(0,0,0,0.12)', minWidth: 170, overflow: 'hidden' }}
+          ref={el => {
+            if (el && ref.current) {
+              const btn = ref.current.getBoundingClientRect();
+              el.style.top  = (btn.bottom + 6) + 'px';
+              el.style.right = (window.innerWidth - btn.right) + 'px';
+            }
+          }}>
+          {[{ format: 'csv', label: 'Export as CSV' }, { format: 'txt', label: 'Export as TXT' }].map(opt => (
+            <Box key={opt.format}
+              onClick={() => doExport(opt.format)}
+              sx={{ display: 'flex', alignItems: 'center', gap: 1.25, px: 2, py: 1.125, cursor: 'pointer', '&:hover': { backgroundColor: T.borderSoft } }}>
+              <FileIcon sx={{ fontSize: 14, color: T.textMuted }} />
+              <Typography sx={{ fontSize: 12.5, color: T.textBody }}>{opt.label}</Typography>
+            </Box>
+          ))}
+        </Box>
+      )}
+    </Box>
+  );
 };
 
-// ── Heatmap cell color ─────────────────────────────────────────────────────────
-const getHeatColor = (value, max) => {
-  if (!value || max === 0) return { bg: T.rowBg, color: T.textFaint };
-  const intensity = value / max;
-  if (intensity >= 0.8) return { bg: '#FEE2E2', color: '#991B1B' };
-  if (intensity >= 0.6) return { bg: '#FEF3C7', color: '#92400E' };
-  if (intensity >= 0.4) return { bg: '#DBEAFE', color: '#1E40AF' };
-  if (intensity >= 0.2) return { bg: '#DCFCE7', color: '#166534' };
-  return { bg: '#F9FAFB', color: T.textMuted };
-};
-
-// ── CLIMATE: Fetch directly from Open-Meteo (bypasses backend) ─────────────────
-// Step 1: geocode city name → lat/lng via Open-Meteo Geocoding API
-// Step 2: fetch daily historical data → aggregate to monthly averages
-const geocodeCity = async (cityName) => {
-  const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(cityName)}&count=1&language=en&format=json`;
-  const res  = await fetch(url);
-  if (!res.ok) throw new Error('Geocoding request failed');
-  const data = await res.json();
-  if (!data.results?.length) throw new Error(`Could not find coordinates for "${cityName}". Try a city name like "Dagupan" or "Manila".`);
-  const { latitude, longitude, name, admin1 } = data.results[0];
-  return { latitude, longitude, displayName: `${name}${admin1 ? ', ' + admin1 : ''}` };
-};
-
-const fetchOpenMeteoClimate = async (lat, lng, startDate, endDate) => {
-  // Daily variables — aggregated to monthly below
-  const vars = 'temperature_2m_mean,precipitation_sum,relative_humidity_2m_mean';
-  const url  = `https://archive-api.open-meteo.com/v1/archive?latitude=${lat}&longitude=${lng}&start_date=${startDate}&end_date=${endDate}&daily=${vars}&timezone=Asia%2FManila`;
-  const res  = await fetch(url);
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.reason || `Open-Meteo returned ${res.status}`);
-  }
-  const data = await res.json();
-  const daily = data.daily;
-  if (!daily?.time?.length) throw new Error('No climate data returned from Open-Meteo.');
-
-  // Aggregate daily → monthly averages
-  const monthly = {};
-  daily.time.forEach((dateStr, i) => {
-    const monthKey = dateStr.slice(0, 7); // "YYYY-MM"
-    if (!monthly[monthKey]) monthly[monthKey] = { tempSum: 0, rainSum: 0, humidSum: 0, count: 0 };
-    const m = monthly[monthKey];
-    m.tempSum  += daily.temperature_2m_mean?.[i]        ?? 0;
-    m.rainSum  += daily.precipitation_sum?.[i]          ?? 0;
-    m.humidSum += daily.relative_humidity_2m_mean?.[i]  ?? 0;
-    m.count    += 1;
-  });
-
-  return Object.entries(monthly)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([month, m]) => ({
-      month,
-      temperature: parseFloat((m.tempSum  / m.count).toFixed(1)),
-      rainfall:    parseFloat((m.rainSum).toFixed(1)),   // monthly total mm
-      humidity:    parseFloat((m.humidSum / m.count).toFixed(1)),
-    }));
-};
-
-// ── History ────────────────────────────────────────────────────────────────────
+// ── Main ───────────────────────────────────────────────────────────────────────
 const History = ({ onNavigate, onLogout }) => {
-  const [selectedDisease,   setSelectedDisease]   = useState('all');
-  const [selectedYear,      setSelectedYear]      = useState('all');
-  const [selectedBarangay,  setSelectedBarangay]  = useState('all');
-  const [climateOverlay,    setClimateOverlay]    = useState(false);
-  const [climateType,       setClimateType]       = useState('temperature');
-
   const [forecastHistory,    setForecastHistory]    = useState([]);
   const [availableDiseases,  setAvailableDiseases]  = useState([]);
-  const [availableBarangays, setAvailableBarangays] = useState([]);
-  const [hasData,            setHasData]            = useState(false);
+  const [selectedYear,       setSelectedYear]       = useState(null);
 
-  // ── Climate state ──────────────────────────────────────────────────────────
-  const [climateData,      setClimateData]      = useState([]);
-  const [climateLoading,   setClimateLoading]   = useState(false);
-  const [climateError,     setClimateError]     = useState('');
-  const [resolvedCityName, setResolvedCityName] = useState('');
-
-  // ── Load from localStorage ─────────────────────────────────────────────────
   useEffect(() => {
     try {
       const h = localStorage.getItem('forecastHistory');
-      if (h) {
-        const parsed = JSON.parse(h);
-        setForecastHistory(parsed);
-        setHasData(parsed.length > 0);
-      }
+      if (h) setForecastHistory(JSON.parse(h));
       const d = localStorage.getItem('diseaseColumns');
       if (d) setAvailableDiseases(JSON.parse(d));
-      const b = localStorage.getItem('availableBarangays');
-      if (b) setAvailableBarangays(JSON.parse(b));
     } catch (e) { console.error(e); }
   }, []);
 
-  // ── Fetch climate data directly from Open-Meteo ───────────────────────────
-  const fetchClimateData = useCallback(async () => {
-    const city      = localStorage.getItem('datasetCity');
-    const startDate = localStorage.getItem('datasetStartDate');
-    const endDate   = localStorage.getItem('datasetEndDate');
+  // Sorted unique years from history
+  const availableYears = [...new Set(
+    forecastHistory.map(h => getPeriodYear(h.period)).filter(Boolean)
+  )].sort();
 
-    // Derive date range from forecast history if localStorage keys are missing
-    let start = startDate;
-    let end   = endDate;
-    if ((!start || !end) && forecastHistory.length > 0) {
-      const periods = forecastHistory.map(i => i.period).filter(Boolean).sort();
-      start = start || (periods[0] + '-01');
-      end   = end   || (periods[periods.length - 1] + '-28');
-    }
+  // Build flat rows: one row per barangay + period + disease
+  const allRows = forecastHistory
+    .filter(h => !selectedYear || getPeriodYear(h.period) === selectedYear)
+    .map(h => ({
+      barangay: h.barangay || '—',
+      year:     getPeriodYear(h.period) || '—',
+      month:    formatMonthLabel(h.period) || '—',
+      illness:  getDiseaseLabel(h.disease),
+      total:    (h.predictedValue ?? 0).toLocaleString(),
+      _period:  h.period || '',
+    }))
+    .sort((a, b) => a.barangay.localeCompare(b.barangay) || a._period.localeCompare(b._period) || a.illness.localeCompare(b.illness));
 
-    if (!city || !start || !end) {
-      setClimateError(
-        'Missing city or date range. Make sure your dataset has city info, or re-upload.'
-      );
-      return;
-    }
-
-    setClimateLoading(true);
-    setClimateError('');
-
-    try {
-      // Step 1 — geocode city name to coordinates
-      const { latitude, longitude, displayName } = await geocodeCity(city);
-      setResolvedCityName(displayName);
-
-      // Step 2 — fetch monthly climate data from Open-Meteo archive
-      const records = await fetchOpenMeteoClimate(latitude, longitude, start, end);
-      setClimateData(records);
-    } catch (err) {
-      setClimateError(err.message || 'Could not load climate data from Open-Meteo.');
-    } finally {
-      setClimateLoading(false);
-    }
-  }, [forecastHistory]);
-
-  useEffect(() => {
-    if (climateOverlay && climateData.length === 0 && !climateLoading) fetchClimateData();
-  }, [climateOverlay]);
-
-  // ── Filtering ──────────────────────────────────────────────────────────────
-  const getFiltered = () => {
-    let f = forecastHistory;
-    if (selectedDisease  !== 'all') f = f.filter(i => i.disease   === selectedDisease);
-    if (selectedYear     !== 'all') f = f.filter(i => i.period?.startsWith(selectedYear));
-    if (selectedBarangay !== 'all') f = f.filter(i => i.barangay  === selectedBarangay);
-    return f;
+  const thSx = {
+    fontSize: 11, fontWeight: 600, color: T.textMuted,
+    textTransform: 'uppercase', letterSpacing: '0.5px',
+    padding: '10px 12px', textAlign: 'left', whiteSpace: 'nowrap',
+    backgroundColor: T.pageBg, borderBottom: `1px solid ${T.border}`,
   };
-
-  const getAvailableYears = () => {
-    const years = new Set(forecastHistory.map(i => i.period?.substring(0, 4)).filter(Boolean));
-    return [{ value: 'all', label: 'All Years' }, ...Array.from(years).sort().map(y => ({ value: y, label: y }))];
+  const tdSx = {
+    fontSize: 12.5, color: T.textBody,
+    padding: '10px 12px', borderBottom: `1px solid ${T.borderSoft}`,
+    verticalAlign: 'middle', backgroundColor: '#FFFFFF',
   };
-
-  // ── 1. Forecast Log ────────────────────────────────────────────────────────
-  const buildForecastLog = () => {
-    const filtered = getFiltered();
-    const seen = new Set();
-    return filtered.filter(item => {
-      const key = `${item.disease}-${item.period}-${item.barangay}`;
-      if (seen.has(key)) return false;
-      seen.add(key); return true;
-    }).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')).slice(0, 20);
-  };
-
-  // ── 2. Seasonal Pattern Heatmap ────────────────────────────────────────────
-  const buildHeatmapData = () => {
-    const filtered = forecastHistory.filter(i =>
-      (selectedBarangay === 'all' || i.barangay === selectedBarangay)
-    );
-    const diseasesToShow = selectedDisease === 'all' ? availableDiseases : [selectedDisease];
-    const heatmap = {};
-    diseasesToShow.forEach(d => {
-      heatmap[d] = Array(12).fill(null).map(() => ({ sum: 0, count: 0 }));
-    });
-    filtered.forEach(item => {
-      if (!heatmap[item.disease]) return;
-      const monthIdx = parseInt(item.period?.slice(5, 7)) - 1;
-      if (monthIdx < 0 || monthIdx > 11) return;
-      heatmap[item.disease][monthIdx].sum   += item.predictedValue || 0;
-      heatmap[item.disease][monthIdx].count += 1;
-    });
-    const result = {};
-    diseasesToShow.forEach(d => {
-      result[d] = heatmap[d].map(cell =>
-        cell.count > 0 ? Math.round(cell.sum / cell.count) : null
-      );
-    });
-    return result;
-  };
-
-  // ── 3. Year-over-Year Comparison ──────────────────────────────────────────
-  const buildYearOverYearData = () => {
-    const filtered = forecastHistory.filter(i =>
-      (selectedBarangay === 'all' || i.barangay === selectedBarangay) &&
-      (selectedDisease  === 'all' || i.disease  === selectedDisease)
-    );
-    const years  = Array.from(new Set(filtered.map(i => i.period?.substring(0, 4)).filter(Boolean))).sort();
-    const months = Array.from(new Set(filtered.map(i => i.period?.slice(5, 7)).filter(Boolean))).sort();
-    return months.map(m => {
-      const row = { month: MONTH_LABELS[parseInt(m) - 1] };
-      years.forEach(y => {
-        const items = filtered.filter(i => i.period === `${y}-${m}`);
-        row[y] = items.length ? Math.round(items.reduce((s, i) => s + (i.predictedValue || 0), 0)) : null;
-      });
-      return row;
-    });
-  };
-
-  // ── 4. Climate-Disease Correlation ────────────────────────────────────────
-  const buildCorrelationData = () => {
-    if (!climateData.length) return [];
-    const filtered = forecastHistory.filter(i =>
-      (selectedBarangay === 'all' || i.barangay === selectedBarangay) &&
-      (selectedDisease  === 'all' || i.disease  === selectedDisease)
-    );
-    return climateData.map(c => {
-      const row = {
-        month:       c.month,
-        temperature: c.temperature,
-        rainfall:    c.rainfall,
-        humidity:    c.humidity,
-      };
-      const monthItems = filtered.filter(i => i.period === c.month);
-      row.cases = monthItems.length
-        ? Math.round(monthItems.reduce((s, i) => s + (i.predictedValue || 0), 0))
-        : null;
-      return row;
-    });
-  };
-
-  // ── CSV Export ─────────────────────────────────────────────────────────────
-  const handleExportCSV = () => {
-    const filtered = getFiltered();
-    if (!filtered.length) return;
-    const headers = ['Date Generated', 'Barangay', 'Disease', 'Period', 'Predicted Cases', 'Trend', 'Confidence', 'Forecast Horizon'];
-    const rows = filtered.map(i => [
-      i.createdAt || '', i.barangay || '', getDiseaseInfo(i.disease).label,
-      i.period || '', i.predictedValue || 0, i.trend || '', `${i.confidence || 78}%`, i.forecastHorizon || '',
-    ]);
-    const csv  = [headers, ...rows].map(r => r.map(v => `"${v}"`).join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement('a');
-    a.href     = url;
-    a.download = `predicthealth_history_${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  // ── Computed data ──────────────────────────────────────────────────────────
-  const forecastLog    = buildForecastLog();
-  const heatmapData    = buildHeatmapData();
-  const yoyData        = buildYearOverYearData();
-  const correlData     = buildCorrelationData();
-  const years          = Array.from(new Set(forecastHistory.map(i => i.period?.substring(0, 4)).filter(Boolean))).sort();
-  const diseasesToShow = selectedDisease === 'all' ? availableDiseases : [selectedDisease];
-  const heatmapMax     = Math.max(...Object.values(heatmapData).flatMap(row => row.filter(Boolean)), 0);
-
-  const climateLineColor = climateType === 'temperature' ? T.danger : climateType === 'rainfall' ? '#0EA5E9' : '#06B6D4';
-  const climateLabel     = climateType === 'temperature' ? 'Temperature (°C)' : climateType === 'rainfall' ? 'Rainfall (mm)' : 'Humidity (%)';
-
-  const YEAR_COLORS = ['#1B4F8A', '#0EA5E9', '#8B5CF6', '#EC4899', '#F59E0B', '#10B981'];
 
   return (
     <Box sx={{ display: 'flex', minHeight: '100vh', backgroundColor: T.pageBg }}>
       <Sidebar currentPage="history" onNavigate={onNavigate} onLogout={onLogout} />
+      <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
 
-      <Box sx={{ flex: 1, overflow: 'auto', p: '28px 24px', minWidth: 0 }}>
-
-        {/* Page header */}
-        <Box sx={{ mb: 2.75 }}>
-          <Typography sx={{ fontSize: 18, fontWeight: 700, color: T.textHead, letterSpacing: '-0.3px' }}>
-            History & Analytics
-          </Typography>
-          <Typography sx={{ fontSize: 12, color: T.textMuted, mt: 0.4 }}>
-            Past forecast records, seasonal patterns, and climate-disease correlation
+        {/* Sticky header — border removed */}
+        <Box sx={{
+          px: '24px', minHeight: 64,
+          display: 'flex', alignItems: 'center',
+          backgroundColor: '#FFFFFF', position: 'sticky', top: 0, zIndex: 10,
+          flexShrink: 0,
+        }}>
+          <Typography sx={{ fontSize: 16, fontWeight: 700, color: T.textHead, letterSpacing: '-0.2px' }}>
+            History
           </Typography>
         </Box>
 
-        {/* No data alert */}
-        {!hasData && (
-          <Alert severity="info" icon={<InfoOutlinedIcon fontSize="small" />}
-            sx={{ mb: 2.5, borderRadius: '10px', backgroundColor: T.blueDim, color: T.textHead, border: `1px solid rgba(27,79,138,0.18)`, fontSize: 13, '& .MuiAlert-icon': { color: T.blue } }}>
-            <strong>No forecast history yet.</strong>{' '}
-            Generate predictions from the{' '}
-            <Typography component="span" onClick={() => onNavigate?.('prediction')}
-              sx={{ fontWeight: 600, cursor: 'pointer', color: T.blue, '&:hover': { opacity: 0.75 } }}>
-              Prediction →
-            </Typography>{' '}
-            page to populate this page.
-          </Alert>
-        )}
+        <Box sx={{ px: '24px', pt: '20px', pb: '28px', overflow: 'auto', flex: 1 }}>
 
-        {/* ── Filters ── */}
-        <SCard sx={{ mb: '16px' }}>
-          <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
-            <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-              <Box>
-                <Typography sx={LabelSx}>Barangay</Typography>
-                <Select value={selectedBarangay} size="small" sx={SelectSx} onChange={e => setSelectedBarangay(e.target.value)}>
-                  <MenuItem value="all" sx={{ fontSize: 13 }}>All Barangays</MenuItem>
-                  {availableBarangays.map(b => <MenuItem key={b} value={b} sx={{ fontSize: 13 }}>{b}</MenuItem>)}
-                </Select>
+          {/* ── Filter + Export bar ── */}
+          <SCard sx={{ mb: '14px' }}>
+            <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2 }}>
+                <YearPicker
+                  availableYears={availableYears}
+                  selectedYear={selectedYear}
+                  onSelect={setSelectedYear}
+                />
+                <ExportMenu rows={allRows} availableDiseases={availableDiseases} />
               </Box>
-              <Box>
-                <Typography sx={LabelSx}>Disease</Typography>
-                <Select value={selectedDisease} size="small" sx={SelectSx} onChange={e => setSelectedDisease(e.target.value)}>
-                  <MenuItem value="all" sx={{ fontSize: 13 }}>All Diseases</MenuItem>
-                  {availableDiseases.map(d => {
-                    const info = getDiseaseInfo(d);
-                    return <MenuItem key={d} value={d} sx={{ fontSize: 13 }}>{info.icon} {info.label}</MenuItem>;
-                  })}
-                </Select>
-              </Box>
-              <Box>
-                <Typography sx={LabelSx}>Year</Typography>
-                <Select value={selectedYear} size="small" sx={{ ...SelectSx, minWidth: 120 }} onChange={e => setSelectedYear(e.target.value)}>
-                  {getAvailableYears().map(y => <MenuItem key={y.value} value={y.value} sx={{ fontSize: 13 }}>{y.label}</MenuItem>)}
-                </Select>
-              </Box>
-              <Box sx={{ ml: 'auto' }}>
-                <Button
-                  variant="outlined" size="small"
-                  startIcon={<DownloadIcon sx={{ fontSize: 14 }} />}
-                  onClick={handleExportCSV}
-                  disabled={!hasData}
-                  sx={{
-                    textTransform: 'none', fontSize: 12.5, fontWeight: 600,
-                    borderRadius: '8px', borderColor: T.border, color: T.textBody,
-                    px: 2, py: 0.75,
-                    '&:hover': { borderColor: T.blue, color: T.blue, backgroundColor: T.blueDim },
-                    '&:disabled': { opacity: 0.45 },
-                  }}>
-                  Export CSV
-                </Button>
-              </Box>
-            </Box>
-          </CardContent>
-        </SCard>
+            </CardContent>
+          </SCard>
 
-        {/* ══ SECTION 1: Forecast Log ══ */}
-        <SCard sx={{ mb: '16px' }}>
-          <CardContent sx={{ p: 2.25, '&:last-child': { pb: 2 } }}>
-            <CardHead
-              title="Forecast Log"
-              icon={<HistoryIcon sx={{ fontSize: 15 }} />}
-              right={hasData
-                ? <Tag label={`${forecastLog.length} records`} bg={T.blueDim} color={T.blue} border="rgba(27,79,138,0.18)" />
-                : null}
-            />
-            {!hasData || forecastLog.length === 0 ? (
-              <Box sx={{ textAlign: 'center', py: 5 }}>
-                <MedicalIcon sx={{ fontSize: 40, color: T.borderSoft, mb: 1 }} />
-                <Typography sx={{ fontSize: 12.5, color: T.textMuted }}>No forecast records yet</Typography>
-              </Box>
-            ) : (
-              <TableContainer>
-                <Table size="small">
-                  <TableHead>
-                    <TableRow>
-                      {['Date Generated', 'Barangay', 'Disease', 'Period', 'Predicted Cases', 'Horizon', 'Trend', 'Confidence'].map(col => (
-                        <TableCell key={col} sx={{ fontSize: 11, fontWeight: 600, color: T.textMuted, borderBottom: `1px solid ${T.borderSoft}`, py: 1.25, textTransform: 'uppercase', letterSpacing: '0.5px', whiteSpace: 'nowrap' }}>
-                          {col}
-                        </TableCell>
-                      ))}
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {forecastLog.map((item, idx) => {
-                      const info = getDiseaseInfo(item.disease);
-                      return (
-                        <TableRow key={idx} sx={{ '&:hover': { backgroundColor: T.rowBg }, '& td': { borderBottom: `1px solid ${T.borderSoft}` } }}>
-                          <TableCell sx={{ fontSize: 12, color: T.textMuted, py: 1.25, whiteSpace: 'nowrap' }}>{item.createdAt || '—'}</TableCell>
-                          <TableCell sx={{ fontSize: 12.5, fontWeight: 500, color: T.textBody, py: 1.25 }}>{item.barangay || '—'}</TableCell>
-                          <TableCell sx={{ py: 1.25 }}>
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                              <Box sx={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: getDiseaseColor(item.disease), flexShrink: 0 }} />
-                              <Typography sx={{ fontSize: 12.5, color: T.textBody }}>{info.label}</Typography>
-                            </Box>
-                          </TableCell>
-                          <TableCell sx={{ fontSize: 12.5, fontWeight: 600, color: T.textHead, py: 1.25 }}>{item.period || '—'}</TableCell>
-                          <TableCell sx={{ fontSize: 12.5, fontWeight: 700, color: T.blue, py: 1.25 }}>{(item.predictedValue || 0).toLocaleString()}</TableCell>
-                          <TableCell sx={{ fontSize: 12, color: T.textMuted, py: 1.25 }}>{item.forecastHorizon || '—'}</TableCell>
-                          <TableCell sx={{ py: 1.25 }}><TrendTag trend={item.trend} /></TableCell>
-                          <TableCell sx={{ py: 1.25 }}>
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
-                              <Box sx={{ flex: 1, height: 4, borderRadius: 2, backgroundColor: T.borderSoft, overflow: 'hidden', minWidth: 40 }}>
-                                <Box sx={{ height: '100%', width: `${item.confidence || 78}%`, backgroundColor: item.confidence >= 85 ? T.ok : item.confidence >= 75 ? T.warnAccent : T.danger, borderRadius: 2 }} />
-                              </Box>
-                              <Typography sx={{ fontSize: 11, fontWeight: 600, color: T.textHead, minWidth: 28 }}>{item.confidence || 78}%</Typography>
-                            </Box>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-            )}
-          </CardContent>
-        </SCard>
-
-        {/* ══ SECTION 2: Seasonal Pattern Heatmap ══ */}
-        {hasData && (
-          <SCard sx={{ mb: '16px' }}>
-            <CardContent sx={{ p: 2.25, '&:last-child': { pb: 2 } }}>
-              <CardHead
-                title="Seasonal Pattern Heatmap"
-                icon={<GridOnIcon sx={{ fontSize: 15 }} />}
-                right={
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                      {[
-                        { bg: '#F9FAFB', label: 'Low' },
-                        { bg: '#DCFCE7', label: '' },
-                        { bg: '#DBEAFE', label: '' },
-                        { bg: '#FEF3C7', label: '' },
-                        { bg: '#FEE2E2', label: 'High' },
-                      ].map((c, i) => (
-                        <Box key={i} sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
-                          <Box sx={{ width: 14, height: 14, borderRadius: '3px', backgroundColor: c.bg, border: `1px solid ${T.borderSoft}` }} />
-                          {c.label && <Typography sx={{ fontSize: 10, color: T.textFaint }}>{c.label}</Typography>}
-                        </Box>
-                      ))}
-                    </Box>
-                    <Tag label="Avg cases per month" bg={T.blueDim} color={T.blue} border="rgba(27,79,138,0.18)" />
-                  </Box>
-                }
-              />
-              <Typography sx={{ fontSize: 11.5, color: T.textFaint, mb: 1.75, mt: '-6px' }}>
-                Color intensity shows average forecasted cases per month — darker red = higher surge risk
-              </Typography>
-              {diseasesToShow.length === 0 || Object.keys(heatmapData).length === 0 ? (
-                <Box sx={{ textAlign: 'center', py: 4 }}>
-                  <Typography sx={{ fontSize: 12.5, color: T.textMuted }}>Not enough data for heatmap</Typography>
+          {/* ── History Table ── */}
+          <SCard>
+            <CardContent sx={{ p: 0, '&:last-child': { pb: 0 } }}>
+              {forecastHistory.length === 0 ? (
+                <Box sx={{ py: 7, textAlign: 'center' }}>
+                  <PsychologyIcon sx={{ fontSize: 38, color: T.textFaint, mb: 1.5 }} />
+                  <Typography sx={{ fontSize: 13, fontWeight: 600, color: T.textHead, mb: 0.5 }}>No history yet</Typography>
+                  <Typography sx={{ fontSize: 12, color: T.textMuted, mb: 2 }}>
+                    Go to the <strong>Dashboard</strong> to generate forecasts first.
+                  </Typography>
+                  <Button size="small" onClick={() => onNavigate?.('dashboard')}
+                    startIcon={<PsychologyIcon sx={{ fontSize: 13 }} />}
+                    sx={{
+                      textTransform: 'none', fontSize: 12, fontWeight: 600,
+                      color: T.blue, backgroundColor: T.blueDim,
+                      border: `1px solid rgba(37,99,235,0.25)`, borderRadius: '7px',
+                      px: 2, py: 0.75, '&:hover': { backgroundColor: 'rgba(37,99,235,0.12)' },
+                    }}>
+                    Go to Dashboard
+                  </Button>
+                </Box>
+              ) : allRows.length === 0 ? (
+                <Box sx={{ py: 6, textAlign: 'center' }}>
+                  <Typography sx={{ fontSize: 12.5, color: T.textMuted }}>No records found for the selected year.</Typography>
                 </Box>
               ) : (
                 <Box sx={{ overflowX: 'auto' }}>
-                  <Table size="small" sx={{ minWidth: 600 }}>
-                    <TableHead>
-                      <TableRow>
-                        <TableCell sx={{ fontSize: 11, fontWeight: 600, color: T.textMuted, borderBottom: `1px solid ${T.borderSoft}`, py: 1, width: 130 }}>Disease</TableCell>
-                        {MONTH_LABELS.map(m => (
-                          <TableCell key={m} align="center" sx={{ fontSize: 11, fontWeight: 600, color: T.textMuted, borderBottom: `1px solid ${T.borderSoft}`, py: 1, px: 0.5 }}>{m}</TableCell>
-                        ))}
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {diseasesToShow.map(d => {
-                        const info   = getDiseaseInfo(d);
-                        const values = heatmapData[d] || Array(12).fill(null);
-                        return (
-                          <TableRow key={d} sx={{ '& td': { borderBottom: `1px solid ${T.borderSoft}` } }}>
-                            <TableCell sx={{ py: 1 }}>
-                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
-                                <Box sx={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: getDiseaseColor(d), flexShrink: 0 }} />
-                                <Typography sx={{ fontSize: 12, fontWeight: 500, color: T.textBody }}>{info.label}</Typography>
-                              </Box>
-                            </TableCell>
-                            {values.map((val, i) => {
-                              const { bg, color } = getHeatColor(val, heatmapMax);
-                              return (
-                                <Tooltip key={i} title={val != null ? `${MONTH_LABELS[i]}: ${val.toLocaleString()} avg cases` : 'No data'} placement="top">
-                                  <TableCell align="center" sx={{ py: 0.75, px: 0.5, backgroundColor: bg, cursor: 'default' }}>
-                                    <Typography sx={{ fontSize: 10.5, fontWeight: val ? 600 : 400, color }}>
-                                      {val != null ? val.toLocaleString() : '—'}
-                                    </Typography>
-                                  </TableCell>
-                                </Tooltip>
-                              );
-                            })}
-                          </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+                    <colgroup>
+                      <col style={{ width: '22%' }} />
+                      <col style={{ width: '13%' }} />
+                      <col style={{ width: '20%' }} />
+                      <col style={{ width: '20%' }} />
+                      <col style={{ width: '25%' }} />
+                    </colgroup>
+                    <thead>
+                      <tr>
+                        <th style={{ ...thSx, paddingLeft: 24 }}>Barangay</th>
+                        <th style={thSx}>Year</th>
+                        <th style={thSx}>Month</th>
+                        <th style={thSx}>Illness</th>
+                        <th style={{ ...thSx, textAlign: 'center', paddingRight: 24 }}>Total Patients</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {allRows.map((row, i) => (
+                        <tr key={i}>
+                          <td style={{ ...tdSx, fontWeight: 600, color: T.textHead, paddingLeft: 24 }}>{row.barangay}</td>
+                          <td style={{ ...tdSx, color: T.textMuted, fontWeight: 500 }}>{row.year}</td>
+                          <td style={tdSx}>{row.month}</td>
+                          <td style={tdSx}>{row.illness}</td>
+                          <td style={{ ...tdSx, textAlign: 'center', fontWeight: 700, color: T.textHead, paddingRight: 24 }}>{row.total}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </Box>
               )}
             </CardContent>
           </SCard>
-        )}
 
-        {/* ══ SECTION 3: Year-over-Year Comparison ══ */}
-        {hasData && yoyData.length > 0 && years.length > 0 && (
-          <SCard sx={{ mb: '16px' }}>
-            <CardContent sx={{ p: 2.25, '&:last-child': { pb: 2 } }}>
-              <CardHead
-                title="Year-over-Year Comparison"
-                icon={<BarChartIcon sx={{ fontSize: 15 }} />}
-                right={<Tag label={`${years.length} year${years.length > 1 ? 's' : ''}`} bg={T.blueDim} color={T.blue} border="rgba(27,79,138,0.18)" />}
-              />
-              <Typography sx={{ fontSize: 11.5, color: T.textFaint, mb: 1.75, mt: '-6px' }}>
-                Forecasted cases by month across different years — compare if surges are worsening or improving
-              </Typography>
-              <ResponsiveContainer width="100%" height={240}>
-                <BarChart data={yoyData} margin={{ top: 4, right: 8, left: -14, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke={T.borderSoft} vertical={false} />
-                  <XAxis dataKey="month" axisLine={false} tickLine={false} style={{ fontSize: 10.5, fill: T.textFaint }} />
-                  <YAxis axisLine={false} tickLine={false} style={{ fontSize: 10.5, fill: T.textFaint }} />
-                  <RechartsTooltip contentStyle={tooltipStyle} />
-                  <Legend wrapperStyle={{ paddingTop: 12, fontSize: 11 }} />
-                  {years.map((y, i) => (
-                    <Bar key={y} dataKey={y} name={y} fill={YEAR_COLORS[i % YEAR_COLORS.length]} radius={[3, 3, 0, 0]} maxBarSize={32} />
-                  ))}
-                </BarChart>
-              </ResponsiveContainer>
-            </CardContent>
-          </SCard>
-        )}
-
-        {/* ══ SECTION 4: Climate-Disease Correlation ══ */}
-        <SCard>
-          <CardContent sx={{ p: 2.25, '&:last-child': { pb: 2 } }}>
-            <CardHead
-              title="Climate–Disease Correlation"
-              icon={<ShowChartIcon sx={{ fontSize: 15 }} />}
-              right={
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-                  <FormControlLabel
-                    control={
-                      <Switch checked={climateOverlay} onChange={e => setClimateOverlay(e.target.checked)} size="small"
-                        sx={{ '& .MuiSwitch-thumb': { width: 14, height: 14 }, '& .MuiSwitch-track': { borderRadius: 7 } }} />
-                    }
-                    label={<Typography sx={{ fontSize: 12, color: T.textMuted, fontWeight: 500 }}>Show Climate</Typography>}
-                    sx={{ m: 0 }}
-                  />
-                  {climateOverlay && (
-                    <Select value={climateType} size="small" sx={{ ...SelectSx, minWidth: 155 }} onChange={e => setClimateType(e.target.value)}>
-                      <MenuItem value="temperature" sx={{ fontSize: 13 }}><ThermostatIcon sx={{ fontSize: 13, mr: 0.5 }} /> Temperature</MenuItem>
-                      <MenuItem value="rainfall"    sx={{ fontSize: 13 }}><WaterDropIcon   sx={{ fontSize: 13, mr: 0.5 }} /> Rainfall</MenuItem>
-                      <MenuItem value="humidity"    sx={{ fontSize: 13 }}><AirIcon         sx={{ fontSize: 13, mr: 0.5 }} /> Humidity</MenuItem>
-                    </Select>
-                  )}
-                  {climateOverlay && climateLoading && <CircularProgress size={13} sx={{ color: T.blue }} />}
-                  {climateOverlay && !climateLoading && climateData.length > 0 && (
-                    <Tooltip title="Refresh climate data">
-                      <RefreshIcon onClick={fetchClimateData} sx={{ fontSize: 16, color: T.textMuted, cursor: 'pointer', '&:hover': { color: T.blue } }} />
-                    </Tooltip>
-                  )}
-                </Box>
-              }
-            />
-            <Typography sx={{ fontSize: 11.5, color: T.textFaint, mb: 1.75, mt: '-6px' }}>
-              Compare disease case trends against climate variables to identify environmental surge triggers
-            </Typography>
-
-            {/* Climate error */}
-            {climateOverlay && climateError && (
-              <Box sx={{ mb: 1.5, p: '8px 12px', borderRadius: '7px', backgroundColor: T.dangerBg, border: `1px solid ${T.dangerBorder}` }}>
-                <Typography sx={{ fontSize: 12, color: T.danger, mb: 0.5 }}>{climateError}</Typography>
-                <Typography sx={{ fontSize: 11.5, color: T.textMuted }}>
-                  Make sure <strong>datasetCity</strong> is saved in localStorage when uploading your dataset (e.g. "Dagupan City").
-                </Typography>
-              </Box>
-            )}
-
-            {/* Climate loaded badge */}
-            {climateOverlay && !climateLoading && !climateError && climateData.length > 0 && (
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
-                <Box sx={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: T.ok }} />
-                <Typography sx={{ fontSize: 11.5, color: T.textMuted }}>
-                  Live climate data via Open-Meteo · {climateData.length} months
-                  {resolvedCityName ? ` · ${resolvedCityName}` : ''}
-                </Typography>
-              </Box>
-            )}
-
-            {!hasData ? (
-              <Box sx={{ textAlign: 'center', py: 5 }}>
-                <Typography sx={{ fontSize: 12.5, color: T.textMuted }}>No forecast data to correlate</Typography>
-              </Box>
-            ) : !climateOverlay ? (
-              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', py: 5, gap: 1 }}>
-                <ShowChartIcon sx={{ fontSize: 36, color: T.borderSoft }} />
-                <Typography sx={{ fontSize: 12.5, color: T.textMuted }}>Toggle "Show Climate" to load real climate data and view correlation</Typography>
-              </Box>
-            ) : climateLoading ? (
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1.5, py: 5 }}>
-                <CircularProgress size={16} sx={{ color: T.blue }} />
-                <Typography sx={{ fontSize: 12.5, color: T.textMuted }}>
-                  Loading climate data from Open-Meteo…
-                </Typography>
-              </Box>
-            ) : correlData.length === 0 ? (
-              <Box sx={{ textAlign: 'center', py: 5 }}>
-                <Typography sx={{ fontSize: 12.5, color: T.textMuted }}>No overlapping data between climate and forecast records</Typography>
-              </Box>
-            ) : (
-              <ResponsiveContainer width="100%" height={260}>
-                <ComposedChart data={correlData} margin={{ top: 8, right: 50, left: -14, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke={T.borderSoft} vertical={false} />
-                  <XAxis dataKey="month" axisLine={false} tickLine={false} style={{ fontSize: 10.5, fill: T.textFaint }} />
-                  <YAxis yAxisId="cases"   axisLine={false} tickLine={false} style={{ fontSize: 10.5, fill: T.textFaint }} />
-                  <YAxis yAxisId="climate" orientation="right" axisLine={false} tickLine={false}
-                    style={{ fontSize: 10.5, fill: climateLineColor }}
-                    tickFormatter={v => climateType === 'temperature' ? `${v}°` : climateType === 'rainfall' ? `${v}mm` : `${v}%`}
-                  />
-                  <RechartsTooltip contentStyle={tooltipStyle} />
-                  <Legend wrapperStyle={{ paddingTop: 12, fontSize: 11 }} />
-                  <Bar yAxisId="cases" dataKey="cases" name="Forecasted Cases" fill={T.blue} radius={[3, 3, 0, 0]} maxBarSize={40} />
-                  <Line
-                    yAxisId="climate" type="monotone" dataKey={climateType}
-                    name={climateLabel} stroke={climateLineColor}
-                    strokeWidth={2} strokeDasharray="5 3"
-                    dot={{ fill: climateLineColor, r: 3, strokeWidth: 0 }}
-                    connectNulls
-                  />
-                </ComposedChart>
-              </ResponsiveContainer>
-            )}
-          </CardContent>
-        </SCard>
-
+        </Box>
       </Box>
     </Box>
   );
