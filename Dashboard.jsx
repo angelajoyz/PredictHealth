@@ -384,7 +384,7 @@ const Dashboard = ({ onNavigate, onLogout, uploadedFile, uploadedData }) => {
 
       <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
 
-        {/* ── Page header — sticky, matches sidebar logo row height (64px) ── */}
+        {/* ── Page header ── */}
         <Box sx={{
           px: '24px',
           minHeight: 64,
@@ -581,21 +581,9 @@ const Dashboard = ({ onNavigate, onLogout, uploadedFile, uploadedData }) => {
           {/* ── Chart ── */}
           <SCard sx={{ mb: '14px' }}>
             <CardContent sx={{ p: '18px 20px 14px', '&:last-child': { pb: '14px' } }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
-                <Typography sx={{ fontSize: 13, fontWeight: 600, color: T.textHead }}>
-                  Predicted Patient Volume
-                </Typography>
-                <Box sx={{ display: 'flex', gap: 1 }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                    <Box sx={{ width: 8, height: 2, borderRadius: 1, backgroundColor: T.ok }} />
-                    <Typography sx={{ fontSize: 11, color: T.textMuted }}>Actual</Typography>
-                  </Box>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                    <Box sx={{ width: 8, height: 2, borderRadius: 1, backgroundColor: T.blue }} />
-                    <Typography sx={{ fontSize: 11, color: T.textMuted }}>Predicted</Typography>
-                  </Box>
-                </Box>
-              </Box>
+              <Typography sx={{ fontSize: 13, fontWeight: 600, color: T.textHead, mb: 2 }}>
+                Predicted Patient Volume
+              </Typography>
 
               {(hasData || forecastData) && chartData.length > 0 ? (
                 <ResponsiveContainer width="100%" height={220}>
@@ -618,6 +606,17 @@ const Dashboard = ({ onNavigate, onLogout, uploadedFile, uploadedData }) => {
                   </Typography>
                 </Box>
               )}
+              {/* Centered legend below chart */}
+              <Box sx={{ display: 'flex', justifyContent: 'center', gap: 2, mt: 1.5 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  <Box sx={{ width: 8, height: 2, borderRadius: 1, backgroundColor: T.ok }} />
+                  <Typography sx={{ fontSize: 11, color: T.textMuted }}>Actual</Typography>
+                </Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  <Box sx={{ width: 8, height: 2, borderRadius: 1, backgroundColor: T.blue }} />
+                  <Typography sx={{ fontSize: 11, color: T.textMuted }}>Predicted</Typography>
+                </Box>
+              </Box>
             </CardContent>
           </SCard>
 
