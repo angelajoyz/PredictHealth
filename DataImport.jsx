@@ -263,12 +263,19 @@ const DataImport = ({ onNavigate, onLogout, onDataUploaded }) => {
     clearLocalStorageData();
   };
 
-  const handleSaveAndContinue = () => {
-    const uploadedData = { file: selectedFile, uploadDate: new Date().toISOString() };
-    if (onDataUploaded) onDataUploaded(uploadedData);
-    localStorage.setItem('uploadedData', JSON.stringify({ fileName: selectedFile.name, fileSize: selectedFile.size, uploadDate: uploadedData.uploadDate }));
-    onNavigate?.('dashboard');
-  };
+const handleSaveAndContinue = () => {
+  const now = new Date().toISOString();
+  // I-save sa localStorage MUNA
+  localStorage.setItem('uploadedData', JSON.stringify({
+    fileName:   selectedFile.name,
+    fileSize:   selectedFile.size,
+    uploadDate: now,
+  }));
+  // I-update ang App.jsx state
+  if (onDataUploaded) onDataUploaded({ file: selectedFile, uploadDate: now });
+  // Mag-navigate AFTER state update — gamit ang setTimeout para masigurong na-update na ang state
+  setTimeout(() => onNavigate?.('dashboard'), 50);
+};
 
   return (
     <Box sx={{ display: 'flex', minHeight: '100vh', backgroundColor: T.pageBg }}>

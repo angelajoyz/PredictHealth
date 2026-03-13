@@ -31,16 +31,25 @@ const theme = createTheme({
 });
 
 function App() {
-  const [currentPage, setCurrentPage] = useState(
-    () => localStorage.getItem('currentPage') || 'login'
-  );
+  // ── Restore page only if valid JWT exists ──────────────────
+  const [currentPage, setCurrentPage] = useState(() => {
+    const token = localStorage.getItem('token');
+    if (!token) {
+      localStorage.removeItem('currentPage');
+      return 'login';
+    }
+    return localStorage.getItem('currentPage') || 'dashboard';
+  });
 
+  // ── uploadedFile: actual File object (lost on refresh — normal) ──
   const [uploadedFile, setUploadedFile] = useState(null);
 
-  // ── uploadedData no longer carries barangay — that's decided in Prediction now ──
+  // ── uploadedData: metadata from localStorage (survives refresh) ──
   const [uploadedData, setUploadedData] = useState(() => {
-    const saved = localStorage.getItem('uploadedData');
-    return saved ? JSON.parse(saved) : null;
+    try {
+      const saved = localStorage.getItem('uploadedData');
+      return saved ? JSON.parse(saved) : null;
+    } catch { return null; }
   });
 
   const handleNavigate = (page) => {
@@ -50,13 +59,37 @@ function App() {
 
   const handleLogout = () => {
     localStorage.removeItem('currentPage');
+    localStorage.removeItem('token');
+    localStorage.removeItem('username');
+    localStorage.removeItem('role');
+    localStorage.removeItem('fullName');
+    localStorage.removeItem('uploadedData');
+    localStorage.removeItem('availableBarangays');
+    localStorage.removeItem('diseaseColumns');
+    localStorage.removeItem('datasetCity');
+    localStorage.removeItem('datasetStartDate');
+    localStorage.removeItem('datasetEndDate');
+    setUploadedFile(null);
+    setUploadedData(null);
     setCurrentPage('login');
   };
 
-  const handleDataUploaded = (data) => {
-    setUploadedFile(data.file);
-    // Store file + uploadDate only — barangay selection happens in Prediction
-    setUploadedData({ file: data.file, uploadDate: data.uploadDate });
+const handleDataUploaded = (data) => {
+  setUploadedFile(data.file);
+  setUploadedData({
+    file:       data.file,
+    fileName:   data.file?.name,
+    fileSize:   data.file?.size,
+    uploadDate: data.uploadDate,
+  });
+};
+
+  // ── Shared props for all authenticated pages ───────────────
+  const sharedProps = {
+    onNavigate:   handleNavigate,
+    onLogout:     handleLogout,
+    uploadedFile: uploadedFile,
+    uploadedData: uploadedData,
   };
 
   return (
@@ -68,34 +101,23 @@ function App() {
         )}
 
         {currentPage === 'dashboard' && (
-          <Dashboard
-            onNavigate={handleNavigate}
-            onLogout={handleLogout}
-          />
+          // ✅ FIXED: uploadedFile at uploadedData ay pinapasa na
+          <Dashboard {...sharedProps} />
         )}
 
         {currentPage === 'history' && (
-          <History
-            onNavigate={handleNavigate}
-            onLogout={handleLogout}
-          />
+          <History {...sharedProps} />
         )}
 
         {currentPage === 'dataimport' && (
           <DataImport
-            onNavigate={handleNavigate}
-            onLogout={handleLogout}
+            {...sharedProps}
             onDataUploaded={handleDataUploaded}
           />
         )}
 
         {currentPage === 'prediction' && (
-          <Prediction
-            onNavigate={handleNavigate}
-            onLogout={handleLogout}
-            uploadedFile={uploadedFile}
-            uploadedData={uploadedData}
-          />
+          <Prediction {...sharedProps} />
         )}
       </div>
     </ThemeProvider>

@@ -1,0 +1,28 @@
+# Web framework
+Flask==3.0.0
+flask-cors==4.0.0
+
+# Database
+flask-sqlalchemy==3.1.1
+psycopg2-binary==2.9.9
+
+# Auth
+flask-jwt-extended==4.6.0
+werkzeug==3.0.1
+
+# Data processing
+pandas==2.2.3
+numpy==1.26.4
+openpyxl==3.1.5
+scikit-learn==1.5.2
+scipy==1.14.1
+python-dateutil==2.9.0
+
+# ML
+tensorflow==2.16.2
+
+# HTTP (climate API)
+requests==2.32.3
+
+# WSGI server (for Render deployment)
+gunicorn==22.0.0

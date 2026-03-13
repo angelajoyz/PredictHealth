@@ -31,6 +31,8 @@ const features = [
   { title: 'Localized Insights',       desc: 'Provides barangay-level health forecasts.'      },
 ];
 
+const API_BASE_URL = 'http://localhost:5000/api';
+
 const Login = ({ onLogin }) => {
   const [username, setUsername]         = useState('');
   const [password, setPassword]         = useState('');
@@ -38,22 +40,55 @@ const Login = ({ onLogin }) => {
   const [error, setError]               = useState('');
   const [loading, setLoading]           = useState(false);
 
-  const handleLogin = () => {
-    if (!username || !password) { setError('Please enter your username and password.'); return; }
+  const handleLogin = async () => {
+    if (!username || !password) {
+      setError('Please enter your username and password.');
+      return;
+    }
+
     setLoading(true);
-    setTimeout(() => {
-      if (username === 'admin' && password === 'admin123') {
-        onLogin(true);
-      } else {
-        setError('Invalid username or password.');
+    setError('');
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        setError(data.error || data.message || 'Invalid username or password.');
         setLoading(false);
+        return;
       }
-    }, 600);
+
+      // ── Save token + user info to localStorage ──────────
+      const token = data.access_token || data.token;
+      if (!token) {
+        setError('Login failed: no token received from server.');
+        setLoading(false);
+        return;
+      }
+
+      localStorage.setItem('token',    token);
+      localStorage.setItem('username', data.user?.username || username);
+      localStorage.setItem('role',     data.user?.role     || 'staff');
+      localStorage.setItem('fullName', data.user?.full_name || '');
+
+      // ── Notify parent (App.jsx) that login succeeded ────
+      onLogin(true);
+
+    } catch (err) {
+      console.error('Login error:', err);
+      setError('Cannot connect to server. Make sure the backend is running.');
+      setLoading(false);
+    }
   };
 
   const handleKeyPress = (e) => { if (e.key === 'Enter') handleLogin(); };
 
-  // Shared field style — hides browser's built-in password toggle (the black icon)
   const fieldSx = {
     '& .MuiOutlinedInput-root': {
       borderRadius: '9px', fontSize: 13, backgroundColor: '#FAFBFC',
@@ -64,7 +99,6 @@ const Login = ({ onLogin }) => {
     },
     '& .MuiInputBase-input': {
       py: 1.15,
-      // Hide browser native password reveal button (Edge/Chrome)
       '&::-ms-reveal':          { display: 'none' },
       '&::-ms-clear':           { display: 'none' },
       '&::-webkit-credentials-auto-fill-button': { display: 'none' },
@@ -80,13 +114,11 @@ const Login = ({ onLogin }) => {
         flexDirection: 'column', justifyContent: 'center',
         px: '8%', position: 'relative', gap: 3,
       }}>
-        {/* BG glows */}
         <Box sx={{ position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none' }}>
           <Box sx={{ position: 'absolute', width: 350, height: 350, top: '-80px', left: '-80px', borderRadius: '50%', background: 'radial-gradient(circle, #4A90D9 0%, transparent 70%)', opacity: 0.07 }} />
           <Box sx={{ position: 'absolute', width: 220, height: 220, bottom: '30px', right: '-20px', borderRadius: '50%', background: 'radial-gradient(circle, #4A90D9 0%, transparent 70%)', opacity: 0.05 }} />
         </Box>
 
-        {/* Logo + name */}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
           <Box sx={{
             width: 46, height: 46, borderRadius: '12px', backgroundColor: T.blue,
@@ -105,11 +137,9 @@ const Login = ({ onLogin }) => {
           </Box>
         </Box>
 
-        {/* Headline + description */}
         <Box>
           <Typography sx={{ fontSize: 26, fontWeight: 800, color: 'rgba(255,255,255,0.93)', letterSpacing: '-0.5px', lineHeight: 1.3, mb: 1.5 }}>
             Smarter Health Planning<br />
-            {/* Slightly muted blue — not overly bright */}
             <Box component="span" sx={{ color: '#5B9FD4' }}>Powered by</Box> Machine Learning
           </Typography>
           <Typography sx={{ fontSize: 13, color: 'rgba(255,255,255,0.38)', lineHeight: 1.75, maxWidth: 340 }}>
@@ -117,7 +147,6 @@ const Login = ({ onLogin }) => {
           </Typography>
         </Box>
 
-        {/* Feature highlights — tighter gap */}
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.9 }}>
           {features.map((f, i) => (
             <Box key={i} sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.25 }}>
@@ -130,7 +159,6 @@ const Login = ({ onLogin }) => {
           ))}
         </Box>
 
-        {/* Divider */}
         <Box sx={{ position: 'absolute', right: 0, top: '10%', bottom: '10%', width: '1px', backgroundColor: 'rgba(255,255,255,0.06)' }} />
       </Box>
 
@@ -154,7 +182,6 @@ const Login = ({ onLogin }) => {
             </Box>
           </Box>
 
-          {/* Heading */}
           <Box sx={{ mb: 3 }}>
             <Typography sx={{ fontSize: 20, fontWeight: 800, color: T.t1, letterSpacing: '-0.3px', mb: 0.5 }}>
               Welcome Back
@@ -164,7 +191,6 @@ const Login = ({ onLogin }) => {
             </Typography>
           </Box>
 
-          {/* Error */}
           {error && (
             <Alert severity="error" sx={{ mb: 2.5, borderRadius: '9px', fontSize: 12, py: 0.5 }}>
               {error}
@@ -189,7 +215,7 @@ const Login = ({ onLogin }) => {
             />
           </Box>
 
-          {/* Password — inputProps disables native browser reveal icon */}
+          {/* Password */}
           <Box sx={{ mb: 3 }}>
             <Typography sx={{ fontSize: 11.5, fontWeight: 600, color: T.t2, mb: 0.75 }}>Password</Typography>
             <TextField fullWidth placeholder="Enter your password"
@@ -223,7 +249,6 @@ const Login = ({ onLogin }) => {
             />
           </Box>
 
-          {/* Button */}
           <Button fullWidth variant="contained" onClick={handleLogin} disabled={loading}
             endIcon={!loading && <ArrowForwardIcon sx={{ fontSize: 16 }} />}
             sx={{
@@ -238,7 +263,6 @@ const Login = ({ onLogin }) => {
             {loading ? 'Signing in…' : 'Sign In'}
           </Button>
 
-          {/* Security note — no separator line, just subtle text */}
           <Typography sx={{ fontSize: 11, color: T.t4, textAlign: 'center', mt: 2.5, lineHeight: 1.6 }}>
             Authorized barangay health personnel only.
           </Typography>
