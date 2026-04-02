@@ -5,16 +5,7 @@ Tables:
   - users          → accounts
   - upload_history → tracks every file upload
   - forecasts      → saved forecast results
-  - barangay_data  → monthly health data (wide format, dynamic disease columns)
-
-barangay_data structure:
-  city | barangay | year | month | diseases (JSON) | dominant_sex | dominant_age_group
-
-  diseases JSON stores only the diseases present in the file:
-  {"hfmd_cases": 3, "measles_cases": 2, "influenza_cases": 1}
-
-  dominant_sex      → most common sex per barangay/month (M/F/NULL if not in file)
-  dominant_age_group→ most common age group per barangay/month (NULL if not in file)
+  - barangay_data  → processed health records (flat columns, age/sex breakdown)
 """
 
 from flask_sqlalchemy import SQLAlchemy
@@ -131,131 +122,202 @@ class Forecast(db.Model):
 
 
 # ─────────────────────────────────────────────
-# BARANGAY DATA — monthly wide format
+# BARANGAY DATA
 # ─────────────────────────────────────────────
 class BarangayData(db.Model):
     """
-    One row = one barangay, one month.
+    One row = one disease category for a barangay in a given month.
 
-    diseases JSON = only the diseases present in the uploaded file:
-      {"hfmd_cases": 3, "measles_cases": 2}
-      Never stores 0 for diseases not in the file.
+    Age/sex columns store the breakdown exactly as it appears in the source file.
+    All age/sex columns are nullable — if file has no breakdown, they are NULL
+    and only the _total columns are filled.
 
-    dominant_sex       = most common sex that month for that barangay (M/F)
-                         NULL if file has no sex column
-    dominant_age_group = most common age group that month for that barangay
-                         e.g. "Child (1-4)", "Adult (18-59)", "Senior (60+)"
-                         NULL if file has no age column
+    Disease category columns (_cases) store aggregated totals
+    for that category in that row's barangay+year+month.
     """
     __tablename__ = 'barangay_data'
 
-    id        = db.Column(db.Integer,     primary_key=True)
-    upload_id = db.Column(db.Integer,     db.ForeignKey('upload_history.id'), nullable=False)
+    id        = db.Column(db.Integer, primary_key=True)
+    upload_id = db.Column(db.Integer, db.ForeignKey('upload_history.id'), nullable=False)
 
-    # ── Location ───────────────────────────────────────────
+    # ── Location ──────────────────────────────────────────
     city     = db.Column(db.String(100), nullable=True)
     barangay = db.Column(db.String(150), nullable=False)
 
-    # ── Time ───────────────────────────────────────────────
+    # ── Time ──────────────────────────────────────────────
     year  = db.Column(db.Integer, nullable=False)
     month = db.Column(db.Integer, nullable=False)
+    week  = db.Column(db.Integer, nullable=True)   # NULL if monthly
 
-    # ── Disease counts (dynamic — only what's in the file) ─
-    diseases = db.Column(db.JSON, nullable=False, default=dict)
-    # Example: {"hfmd_cases": 3, "measles_cases": 2, "influenza_cases": 1}
+    # ── Disease category (for LSTM forecast) ─────────────
+    disease_category = db.Column(db.String(50),  nullable=False)  # e.g. 'respiratory'
+    disease_label = db.Column(db.String(500), nullable=True)   # e.g. 'Respiratory'
 
-    # ── Demographics (NULL if not in file) ─────────────────
-    dominant_sex       = db.Column(db.String(10),  nullable=True)
-    # Most common sex per barangay+month: 'M', 'F', or NULL
+    # ── Totals (always filled) ────────────────────────────
+    total_male   = db.Column(db.Integer, nullable=False, default=0)
+    total_female = db.Column(db.Integer, nullable=False, default=0)
+    total_cases  = db.Column(db.Integer, nullable=False, default=0)
 
-    dominant_age_group = db.Column(db.String(50),  nullable=True)
-    # Most common age group: 'Infant (0-1)', 'Child (1-4)', 'Child (5-9)',
-    # 'Teen (10-17)', 'Adult (18-59)', 'Senior (60+)', or NULL
+    # ── Age/sex breakdown (nullable) ──────────────────────
+    under1_m        = db.Column(db.Integer, nullable=True)
+    under1_f        = db.Column(db.Integer, nullable=True)
+    age_1_4_m       = db.Column(db.Integer, nullable=True)
+    age_1_4_f       = db.Column(db.Integer, nullable=True)
+    age_5_9_m       = db.Column(db.Integer, nullable=True)
+    age_5_9_f       = db.Column(db.Integer, nullable=True)
+    age_10_14_m     = db.Column(db.Integer, nullable=True)
+    age_10_14_f     = db.Column(db.Integer, nullable=True)
+    age_15_19_m     = db.Column(db.Integer, nullable=True)
+    age_15_19_f     = db.Column(db.Integer, nullable=True)
+    age_20_24_m     = db.Column(db.Integer, nullable=True)
+    age_20_24_f     = db.Column(db.Integer, nullable=True)
+    age_25_29_m     = db.Column(db.Integer, nullable=True)
+    age_25_29_f     = db.Column(db.Integer, nullable=True)
+    age_30_34_m     = db.Column(db.Integer, nullable=True)
+    age_30_34_f     = db.Column(db.Integer, nullable=True)
+    age_35_39_m     = db.Column(db.Integer, nullable=True)
+    age_35_39_f     = db.Column(db.Integer, nullable=True)
+    age_40_44_m     = db.Column(db.Integer, nullable=True)
+    age_40_44_f     = db.Column(db.Integer, nullable=True)
+    age_45_49_m     = db.Column(db.Integer, nullable=True)
+    age_45_49_f     = db.Column(db.Integer, nullable=True)
+    age_50_54_m     = db.Column(db.Integer, nullable=True)
+    age_50_54_f     = db.Column(db.Integer, nullable=True)
+    age_55_59_m     = db.Column(db.Integer, nullable=True)
+    age_55_59_f     = db.Column(db.Integer, nullable=True)
+    age_60_64_m     = db.Column(db.Integer, nullable=True)
+    age_60_64_f     = db.Column(db.Integer, nullable=True)
+    age_65above_m   = db.Column(db.Integer, nullable=True)
+    age_65above_f   = db.Column(db.Integer, nullable=True)
+    age_65_69_m     = db.Column(db.Integer, nullable=True)
+    age_65_69_f     = db.Column(db.Integer, nullable=True)
+    age_70above_m   = db.Column(db.Integer, nullable=True)
+    age_70above_f   = db.Column(db.Integer, nullable=True)
+    days_0_6_m      = db.Column(db.Integer, nullable=True)
+    days_0_6_f      = db.Column(db.Integer, nullable=True)
+    days_7_28_m     = db.Column(db.Integer, nullable=True)
+    days_7_28_f     = db.Column(db.Integer, nullable=True)
+    days_29_11mo_m  = db.Column(db.Integer, nullable=True)
+    days_29_11mo_f  = db.Column(db.Integer, nullable=True)
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     __table_args__ = (
-        db.Index('ix_barangay_data_lookup', 'city', 'barangay', 'year', 'month'),
-        db.Index('ix_barangay_data_year',   'year', 'month'),
+        db.Index('ix_bd_lookup',   'city', 'barangay', 'year', 'month', 'disease_category'),
+        db.Index('ix_bd_category', 'disease_category', 'year', 'month'),
     )
 
+    # Mapping: source file column name → model attribute
+    AGE_SEX_COL_MAP = {
+        'UNDER1_M':       'under1_m',
+        'UNDER1_F':       'under1_f',
+        '1_4_M':          'age_1_4_m',
+        '1_4_F':          'age_1_4_f',
+        '5_9_M':          'age_5_9_m',
+        '5_9_F':          'age_5_9_f',
+        '10_14_M':        'age_10_14_m',
+        '10_14_F':        'age_10_14_f',
+        '15_19_M':        'age_15_19_m',
+        '15_19_F':        'age_15_19_f',
+        '20_24_M':        'age_20_24_m',
+        '20_24_F':        'age_20_24_f',
+        '25_29_M':        'age_25_29_m',
+        '25_29_F':        'age_25_29_f',
+        '30_34_M':        'age_30_34_m',
+        '30_34_F':        'age_30_34_f',
+        '35_39_M':        'age_35_39_m',
+        '35_39_F':        'age_35_39_f',
+        '40_44_M':        'age_40_44_m',
+        '40_44_F':        'age_40_44_f',
+        '45_49_M':        'age_45_49_m',
+        '45_49_F':        'age_45_49_f',
+        '50_54_M':        'age_50_54_m',
+        '50_54_F':        'age_50_54_f',
+        '55_59_M':        'age_55_59_m',
+        '55_59_F':        'age_55_59_f',
+        '60_64_M':        'age_60_64_m',
+        '60_64_F':        'age_60_64_f',
+        '65ABOVE_M':      'age_65above_m',
+        '65ABOVE_F':      'age_65above_f',
+        '65_69_M':        'age_65_69_m',
+        '65_69_F':        'age_65_69_f',
+        '70ABOVE_M':      'age_70above_m',
+        '70ABOVE_F':      'age_70above_f',
+        '0_6DAYS_M':      'days_0_6_m',
+        '0_6DAYS_F':      'days_0_6_f',
+        '7_28DAYS_M':     'days_7_28_m',
+        '7_28DAYS_F':     'days_7_28_f',
+        '29DAYS_11MOS_M': 'days_29_11mo_m',
+        '29DAYS_11MOS_F': 'days_29_11mo_f',
+    }
+
     def to_dict(self):
-        return {
-            'id':                self.id,
-            'city':              self.city,
-            'barangay':          self.barangay,
-            'year':              self.year,
-            'month':             self.month,
-            'dominant_sex':      self.dominant_sex,
-            'dominant_age_group':self.dominant_age_group,
-            **(self.diseases or {}),
+        d = {
+            'id':               self.id,
+            'city':             self.city,
+            'barangay':         self.barangay,
+            'year':             self.year,
+            'month':            self.month,
+            'disease_category': self.disease_category,
+            'disease_label':    self.disease_label,
+            'total_male':       self.total_male,
+            'total_female':     self.total_female,
+            'total_cases':      self.total_cases,
         }
+        for src, attr in self.AGE_SEX_COL_MAP.items():
+            d[src] = getattr(self, attr)
+        return d
 
 
 # ─────────────────────────────────────────────
-# AGE GROUP CLASSIFIER
-# ─────────────────────────────────────────────
-def classify_age(age):
-    """Convert numeric age → age group label."""
-    try:
-        age = float(age)
-    except (TypeError, ValueError):
-        return 'Unknown'
-    if age < 1:    return 'Infant (0-1)'
-    if age <= 4:   return 'Child (1-4)'
-    if age <= 9:   return 'Child (5-9)'
-    if age <= 17:  return 'Teen (10-17)'
-    if age <= 59:  return 'Adult (18-59)'
-    return 'Senior (60+)'
-
-
-# ─────────────────────────────────────────────
-# HELPER — get data for LSTM forecast
+# HELPER: aggregate for LSTM forecast
 # ─────────────────────────────────────────────
 def get_aggregated_data(city=None, barangay=None):
     """
-    Query barangay_data and return list of dicts ready for DataFrame.
-    Each dict = one barangay+month with disease columns expanded flat.
-
-    Example output row:
-    {
-      'city': 'Boac', 'barangay': 'CAWIT', 'year': 2014, 'month': 1,
-      'hfmd_cases': 3, 'measles_cases': 2,
-      'dominant_sex': 'F', 'dominant_age_group': 'Child (1-4)'
-    }
+    Query barangay_data and pivot to wide format for LSTM.
+    Returns list of dicts: [{barangay, city, year, month, respiratory_cases, ...}]
     """
-    q = BarangayData.query
+    from sqlalchemy import func
+    from collections import defaultdict
+
+    q = db.session.query(
+        BarangayData.city,
+        BarangayData.barangay,
+        BarangayData.year,
+        BarangayData.month,
+        BarangayData.disease_category,
+        func.sum(BarangayData.total_cases).label('total'),
+    )
 
     if city:
         q = q.filter(BarangayData.city == city)
     if barangay and barangay != '__ALL__':
         q = q.filter(BarangayData.barangay.ilike(barangay))
 
-    rows = q.order_by(
+    q = q.group_by(
+        BarangayData.city,
         BarangayData.barangay,
         BarangayData.year,
         BarangayData.month,
-    ).all()
+        BarangayData.disease_category,
+    ).order_by(BarangayData.barangay, BarangayData.year, BarangayData.month)
 
+    rows = q.all()
     if not rows:
         return []
 
-    result = []
+    # Pivot: one row per (barangay, year, month) with disease_category columns
+    pivot = defaultdict(lambda: {'city': '', 'barangay': '', 'year': 0, 'month': 0})
     for r in rows:
-        record = {
-            'city':               r.city or '',
-            'barangay':           r.barangay,
-            'year':               r.year,
-            'month':              r.month,
-            'dominant_sex':       r.dominant_sex,
-            'dominant_age_group': r.dominant_age_group,
-        }
-        # Expand diseases JSON → flat columns
-        if r.diseases:
-            record.update(r.diseases)
-        result.append(record)
+        key = (r.barangay, r.year, r.month)
+        pivot[key]['city']     = r.city or ''
+        pivot[key]['barangay'] = r.barangay
+        pivot[key]['year']     = r.year
+        pivot[key]['month']    = r.month
+        col = f"{r.disease_category}_cases"
+        pivot[key][col] = int(r.total or 0)
 
-    return result
+    return list(pivot.values())
 
 
 # ─────────────────────────────────────────────
@@ -263,8 +325,14 @@ def get_aggregated_data(city=None, barangay=None):
 # ─────────────────────────────────────────────
 def init_db(app):
     with app.app_context():
+        try:
+            BarangayData.__table__.drop(db.engine, checkfirst=True)
+            print("   Old barangay_data table dropped.")
+        except Exception as e:
+            print(f"   Could not drop barangay_data: {e}")
+
         db.create_all()
-        print("✅ All tables created/verified.")
+        print("   All tables created.")
 
         if User.query.count() == 0:
             admin = User(
@@ -277,4 +345,4 @@ def init_db(app):
             admin.set_password('Admin@2024!')
             db.session.add(admin)
             db.session.commit()
-            print("✅ Default admin → username: admin | password: Admin@2024!")
+            print("   Default admin created — username: admin | password: Admin@2024!")

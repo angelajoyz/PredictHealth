@@ -793,3 +793,225 @@ if __name__ == '__main__':
         print(f"\n✅ Result: {df.shape}")
         print(f"Columns: {list(df.columns)}")
         print(df.head())
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ICD-10 MORBIDITY FORMAT PARSER
+# For files like GENERAL_TRIAS_MORBIDITY_2022-2025.xlsx:
+#   REG_CODE | PROV_CODE | MUN_CODE | BGY_CODE | DATE | DISEASE |
+#   UNDER1_M | UNDER1_F | 1_4_M | ... | 29DAYS_11MOS_F
+#
+# Strategy: group rows by (barangay, year, month, disease_category),
+#           sum all age/sex columns per group.
+# ══════════════════════════════════════════════════════════════════════════════
+
+import re as _re
+
+# ICD-10 → (category_key, label)
+_ICD_MAP = [
+    (_re.compile(r'^A[89]\d|^A9\d'),                          'dengue',           'Dengue'),
+    (_re.compile(r'^A[01][5-9]|^A1[6-8]'),                    'tuberculosis',     'Tuberculosis'),
+    (_re.compile(r'^A2[7-9]'),                                 'leptospirosis',    'Leptospirosis'),
+    (_re.compile(r'^A0[0-9]|^A[12][0-9]|^A3[0-9]|^B[4-9]'),  'infectious',       'Other Infectious'),
+    (_re.compile(r'^A0[689]|^K[2-9]\d'),                      'gastrointestinal', 'Gastrointestinal'),
+    (_re.compile(r'^J[0-4]\d|^J[6-9]\d|^U04'),                'respiratory',      'Respiratory'),
+    (_re.compile(r'^U07|^U09'),                                'covid',            'COVID-19'),
+    (_re.compile(r'^I\d\d'),                                   'cardiovascular',   'Cardiovascular'),
+    (_re.compile(r'^E1[0-4]'),                                 'diabetes',         'Diabetes'),
+    (_re.compile(r'^E\d\d|^D[5-9]\d'),                        'blood_metabolic',  'Blood/Metabolic'),
+    (_re.compile(r'^N\d\d'),                                   'urinary',          'Urinary/Renal'),
+    (_re.compile(r'^L\d\d'),                                   'skin',             'Skin Disease'),
+    (_re.compile(r'^M\d\d'),                                   'musculoskeletal',  'Musculoskeletal'),
+    (_re.compile(r'^T1[4-9]|^W5[4-5]|^S\d|^T\d|^W|^V|^Y'),  'injury',           'Injury/Trauma'),
+    (_re.compile(r'^B[0-3]\d'),                                'viral_infection',  'Viral Infection'),
+    (_re.compile(r'^F\d\d'),                                   'mental_health',    'Mental Health'),
+    (_re.compile(r'^O\d\d'),                                   'maternal',         'Maternal/OB'),
+    (_re.compile(r'^C\d\d|^D[0-4]\d'),                        'neoplasm',         'Neoplasm/Cancer'),
+    (_re.compile(r'^G\d\d'),                                   'neurological',     'Neurological'),
+    (_re.compile(r'^H\d\d'),                                   'sensory',          'Eye/Ear'),
+    (_re.compile(r'^Q\d\d'),                                   'congenital',       'Congenital'),
+]
+
+# All age/sex column names in source file order
+_AGE_SEX_COLS = [
+    'UNDER1_M','UNDER1_F','1_4_M','1_4_F','5_9_M','5_9_F',
+    '10_14_M','10_14_F','15_19_M','15_19_F','20_24_M','20_24_F',
+    '25_29_M','25_29_F','30_34_M','30_34_F','35_39_M','35_39_F',
+    '40_44_M','40_44_F','45_49_M','45_49_F','50_54_M','50_54_F',
+    '55_59_M','55_59_F','60_64_M','60_64_F','65ABOVE_M','65ABOVE_F',
+    '65_69_M','65_69_F','70ABOVE_M','70ABOVE_F',
+    '0_6DAYS_M','0_6DAYS_F','7_28DAYS_M','7_28DAYS_F',
+    '29DAYS_11MOS_M','29DAYS_11MOS_F',
+]
+
+_MALE_COLS   = [c for c in _AGE_SEX_COLS if c.endswith('_M')]
+_FEMALE_COLS = [c for c in _AGE_SEX_COLS if c.endswith('_F')]
+
+
+def _icd_category(disease_str):
+    """Map ICD-10 disease string to (category_key, label)."""
+    s = str(disease_str).strip()
+    m = _re.match(r'^([A-Z]\d+)', s)
+    if not m:
+        return None, None
+    code = m.group(1).upper()
+    for pattern, key, label in _ICD_MAP:
+        if pattern.match(code):
+            return key, s   
+    return 'other', s     
+
+def is_morbidity_format(df):
+    """Return True if this looks like the PH DOH morbidity report format."""
+    cols = [str(c).upper().strip() for c in df.columns]
+    has_bgy     = any('BGY' in c or 'BARANGAY' in c for c in cols)
+    has_disease = 'DISEASE' in cols
+    has_age_sex = any(c in cols for c in ['UNDER1_M', '1_4_M', '5_9_M'])
+    return has_bgy and has_disease and has_age_sex
+
+
+def parse_morbidity_file(filepath):
+    """
+    Parse a DOH morbidity report Excel file (multi-sheet, one sheet per year).
+    Returns a tuple: (wide_df_for_lstm, raw_records_for_db)
+
+    wide_df_for_lstm  — standard wide format for LSTM:
+        city | barangay | year | month | respiratory_cases | dengue_cases | ...
+
+    raw_records_for_db — list of dicts with full age/sex breakdown for DB insert:
+        {city, barangay, year, month, disease_category, disease_label,
+         total_male, total_female, total_cases, UNDER1_M, ..., 29DAYS_11MOS_F}
+    """
+    import pandas as pd
+    import numpy as np
+    from collections import defaultdict
+
+    xl     = pd.ExcelFile(filepath, engine='openpyxl')
+    sheets = xl.sheet_names
+
+    all_records = []   # for DB (full age/sex breakdown per disease category)
+
+    for sheet in sheets:
+        try:
+            df = pd.read_excel(filepath, sheet_name=sheet, header=0, engine='openpyxl')
+            df.columns = [str(c).strip() for c in df.columns]
+
+            if not is_morbidity_format(df):
+                print(f"   Sheet '{sheet}' — not morbidity format, skipping")
+                continue
+
+            print(f"   Sheet '{sheet}' — {len(df)} rows")
+
+            # Identify key columns (handle column order difference between 2022 and 2023+)
+            bgy_col     = next((c for c in df.columns if 'BGY' in c.upper() or
+                                'BARANGAY' in c.upper()), None)
+            disease_col = next((c for c in df.columns if c.upper() == 'DISEASE'), None)
+            date_col    = next((c for c in df.columns if c.upper() == 'DATE'), None)
+            mun_col     = next((c for c in df.columns if 'MUN' in c.upper()), None)
+
+            if not bgy_col or not disease_col:
+                print(f"   Sheet '{sheet}' — missing BGY or DISEASE column, skipping")
+                continue
+
+            # Get actual age/sex cols present in this sheet
+            present_age_sex = [c for c in _AGE_SEX_COLS if c in df.columns]
+
+            # Convert age/sex columns to numeric
+            for c in present_age_sex:
+                df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0).astype(int)
+
+            # Parse date → year, month
+            if date_col:
+                df['_parsed_date'] = pd.to_datetime(df[date_col], format='%m/%d/%y', errors='coerce').fillna(pd.to_datetime(df[date_col], dayfirst=True, errors='coerce'))
+                df['_year']  = df['_parsed_date'].dt.year.fillna(
+                    int(_re.search(r'(20\d{2})', str(sheet)).group(1))
+                    if _re.search(r'(20\d{2})', str(sheet)) else 2020
+                ).astype(int)
+                df['_month'] = df['_parsed_date'].dt.month.fillna(1).astype(int)
+            else:
+                yr = int(_re.search(r'(20\d{2})', str(sheet)).group(1)) \
+                     if _re.search(r'(20\d{2})', str(sheet)) else 2020
+                df['_year']  = yr
+                df['_month'] = 1
+
+            # Get city from MUN_CODE column
+            city = ''
+            if mun_col:
+                city_vals = df[mun_col].dropna().astype(str).str.strip().unique()
+                if city_vals.size:
+                    city = city_vals[0]
+
+            # Group by (barangay, year, month, disease_category) → sum age/sex
+            groups = defaultdict(lambda: {c: 0 for c in present_age_sex})
+
+            for _, row in df.iterrows():
+                brgy    = str(row[bgy_col]).strip()
+                disease = str(row[disease_col]).strip()
+                year    = int(row['_year'])
+                month   = int(row['_month'])
+
+                if not brgy or brgy.lower() in ('nan','none',''):
+                    continue
+
+                cat_key, cat_label = _icd_category(disease)
+                if cat_key is None:
+                    continue   # skip zero reports
+
+                key = (city, brgy, year, month, cat_key, cat_label)
+                for c in present_age_sex:
+                    groups[key][c] += int(row.get(c, 0))
+
+            # Convert groups to records
+            for (city_v, brgy, year, month, cat_key, cat_label), age_data in groups.items():
+                total_m = sum(age_data.get(c, 0) for c in _MALE_COLS if c in age_data)
+                total_f = sum(age_data.get(c, 0) for c in _FEMALE_COLS if c in age_data)
+                rec = {
+                    'city':             city_v,
+                    'barangay':         brgy,
+                    'year':             year,
+                    'month':            month,
+                    'disease_category': cat_key,
+                    'disease_label':    cat_label,
+                    'total_male':       total_m,
+                    'total_female':     total_f,
+                    'total_cases':      total_m + total_f,
+                }
+                # Add all age/sex values (NULL-safe)
+                for src_col in _AGE_SEX_COLS:
+                    rec[src_col] = age_data.get(src_col, None)
+                all_records.append(rec)
+
+        except Exception as e:
+            import traceback
+            print(f"   Sheet '{sheet}' error: {e}")
+            traceback.print_exc()
+            continue
+
+    if not all_records:
+        raise ValueError("No valid morbidity data found in file.")
+
+    # Build wide DataFrame for LSTM
+    import pandas as pd
+    df_long = pd.DataFrame(all_records)[
+        ['city','barangay','year','month','disease_category','total_cases']
+    ].copy()
+
+    df_wide = df_long.pivot_table(
+        index=['city','barangay','year','month'],
+        columns='disease_category',
+        values='total_cases',
+        aggfunc='sum',
+        fill_value=0,
+    ).reset_index()
+    df_wide.columns.name = None
+
+    # Rename category keys to _cases columns
+    rename = {col: f"{col}_cases" for col in df_wide.columns
+              if col not in ['city','barangay','year','month']}
+    df_wide = df_wide.rename(columns=rename)
+
+    barangays = df_wide['barangay'].nunique()
+    diseases  = [c for c in df_wide.columns if c.endswith('_cases')]
+    print(f"\n   Morbidity parse complete:")
+    print(f"   Barangays: {barangays} | Categories: {len(diseases)} | DB records: {len(all_records)}")
+    print(f"   Categories: {diseases}")
+
+    return df_wide, all_records
