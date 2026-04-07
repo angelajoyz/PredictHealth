@@ -29,6 +29,7 @@ class User(db.Model):
     full_name  = db.Column(db.String(150), nullable=True)
     role       = db.Column(db.String(20),  default='staff')
     is_active  = db.Column(db.Boolean,     default=True)
+    email_verified = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime,    default=datetime.utcnow)
     last_login = db.Column(db.DateTime,    nullable=True)
 

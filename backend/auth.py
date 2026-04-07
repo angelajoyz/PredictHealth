@@ -13,12 +13,14 @@ Admin-only endpoints:
   DELETE /api/admin/users/<id>  → delete user
 """
 
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import (
     create_access_token, jwt_required, get_jwt_identity
 )
+from flask_mail import Message
+from itsdangerous import URLSafeTimedSerializer, SignatureExpired, BadSignature
 from datetime import datetime
-from backend.database import db, User
+from database import db, User
 
 auth_bp  = Blueprint('auth',  __name__)
 admin_bp = Blueprint('admin', __name__)
@@ -42,6 +44,137 @@ def admin_required(fn):
         return fn(*args, **kwargs)
     return wrapper
 
+def _get_serializer():
+    return URLSafeTimedSerializer(current_app.config['SECRET_KEY'])
+
+def _send_verification_email(user):
+    """Generate a token and send a verification email."""
+    from flask import current_app
+    s = _get_serializer()
+    token = s.dumps(user.email, salt='email-verify')
+
+    # Build verification URL
+    frontend_url = current_app.config.get('FRONTEND_URL', 'http://localhost:5173')
+    verify_link = f"{frontend_url}/verify-email?token={token}"
+
+    mail = current_app.extensions['mail']
+    msg = Message(
+        subject='PredictHealth – Verify your email',
+        recipients=[user.email],
+        html=f"""
+        <h2>Welcome to PredictHealth!</h2>
+        <p>Hi {user.full_name or user.username},</p>
+        <p>Please verify your email by clicking the link below:</p>
+        <p><a href="{verify_link}">Verify Email</a></p>
+        <p>This link expires in 24 hours.</p>
+        <p>If you didn't register, you can ignore this email.</p>
+        """
+    )
+    mail.send(msg)
+
+
+# ── Public registration ──────────────────────────────────
+
+@auth_bp.route('/register', methods=['POST'])
+def register():
+    data = request.get_json() or {}
+
+    username  = data.get('username', '').strip()
+    email     = data.get('email', '').strip()
+    password  = data.get('password', '')
+    full_name = data.get('full_name', '').strip()
+
+    if not username or not email or not password:
+        return jsonify({'error': 'username, email, and password are required'}), 400
+
+    if len(password) < 8:
+        return jsonify({'error': 'Password must be at least 8 characters'}), 400
+
+    if User.query.filter_by(username=username).first():
+        return jsonify({'error': f"Username '{username}' is already taken"}), 409
+
+    if User.query.filter_by(email=email).first():
+        return jsonify({'error': f"Email '{email}' is already registered"}), 409
+
+    user = User(
+        username       = username,
+        email          = email,
+        full_name      = full_name,
+        role           = 'staff',
+        is_active      = True,
+        email_verified = False,
+    )
+    user.set_password(password)
+    db.session.add(user)
+    db.session.commit()
+
+    try:
+        _send_verification_email(user)
+    except Exception as e:
+        current_app.logger.error(f"Failed to send verification email: {e}")
+        return jsonify({
+            'message': 'Account created but verification email failed to send. Contact admin.',
+            'user': user.to_dict(),
+        }), 201
+
+    return jsonify({
+        'message': 'Account created! Check your email to verify your account.',
+        'user': user.to_dict(),
+    }), 201
+
+
+@auth_bp.route('/verify-email', methods=['POST'])
+def verify_email():
+    data  = request.get_json() or {}
+    token = data.get('token', '')
+
+    if not token:
+        return jsonify({'error': 'Token is required'}), 400
+
+    s = _get_serializer()
+    try:
+        email = s.loads(token, salt='email-verify', max_age=86400)  # 24 hours
+    except SignatureExpired:
+        return jsonify({'error': 'Verification link has expired. Please request a new one.'}), 400
+    except BadSignature:
+        return jsonify({'error': 'Invalid verification link.'}), 400
+
+    user = User.query.filter_by(email=email).first()
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+
+    if user.email_verified:
+        return jsonify({'message': 'Email is already verified'}), 200
+
+    user.email_verified = True
+    db.session.commit()
+
+    return jsonify({'message': 'Email verified successfully! You can now log in.'}), 200
+
+
+@auth_bp.route('/resend-verification', methods=['POST'])
+def resend_verification():
+    data  = request.get_json() or {}
+    email = data.get('email', '').strip()
+
+    if not email:
+        return jsonify({'error': 'Email is required'}), 400
+
+    user = User.query.filter_by(email=email).first()
+    if not user:
+        return jsonify({'message': 'If that email exists, a verification link has been sent.'}), 200
+
+    if user.email_verified:
+        return jsonify({'message': 'Email is already verified'}), 200
+
+    try:
+        _send_verification_email(user)
+    except Exception as e:
+        current_app.logger.error(f"Failed to resend verification email: {e}")
+        return jsonify({'error': 'Failed to send email. Try again later.'}), 500
+
+    return jsonify({'message': 'If that email exists, a verification link has been sent.'}), 200
+
 
 # ── Auth routes ──────────────────────────────────────────
 
@@ -61,6 +194,9 @@ def login():
 
     if not user.is_active:
         return jsonify({'error': 'Account is disabled. Contact your administrator.'}), 403
+
+    if not user.email_verified:
+        return jsonify({'error': 'Please verify your email before logging in.'}), 403
 
     # Update last login
     user.last_login = datetime.utcnow()
@@ -208,7 +344,7 @@ def delete_user(user_id):
 @admin_bp.route('/uploads', methods=['GET'])
 @admin_required
 def list_uploads():
-    from backend.database import UploadHistory
+    from database import UploadHistory
     uploads = UploadHistory.query.order_by(UploadHistory.uploaded_at.desc()).limit(100).all()
     return jsonify([u.to_dict() for u in uploads]), 200
 
@@ -218,6 +354,6 @@ def list_uploads():
 @admin_bp.route('/forecasts', methods=['GET'])
 @admin_required
 def list_forecasts():
-    from backend.database import Forecast
+    from database import Forecast
     forecasts = Forecast.query.order_by(Forecast.created_at.desc()).limit(100).all()
     return jsonify([f.to_dict() for f in forecasts]), 200

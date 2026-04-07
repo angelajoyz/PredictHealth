@@ -9,22 +9,25 @@ from dateutil.relativedelta import relativedelta
 from werkzeug.utils import secure_filename
 import gc
 
-from backend.config import Config
-from backend.database import (db, init_db, User, UploadHistory, Forecast, ForecastResult,
+from config import Config
+from database import (db, init_db, User, UploadHistory, Forecast, ForecastResult,
                       BarangayData, get_aggregated_data,
                       get_saved_forecast_dict, get_all_saved_forecast_dict)
-from backend.auth import auth_bp, admin_bp
+from auth import auth_bp, admin_bp
 from models.data_processor import DataProcessor
 from models.lstm_model import LSTMForecaster
-from backend.ultimate_auto_preprocessor import UltimateAutoPreprocessor, is_morbidity_format, parse_morbidity_file
-from backend.smart_health_preprocessor import SmartHealthPreprocessor
-from backend.barangay_city_detector import detect_city_from_barangays
+from ultimate_auto_preprocessor import UltimateAutoPreprocessor, is_morbidity_format, parse_morbidity_file
+from smart_health_preprocessor import SmartHealthPreprocessor
+from barangay_city_detector import detect_city_from_barangays
 
 app = Flask(__name__)
 app.config.from_object(Config)
 
+from flask_mail import Mail
+
 db.init_app(app)
 jwt = JWTManager(app)
+mail = Mail(app)
 
 CORS(app, origins=["http://localhost:3000", "http://localhost:5173"], supports_credentials=True)
 

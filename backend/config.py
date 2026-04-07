@@ -22,6 +22,14 @@ class Config:
     # Database
     SQLALCHEMY_DATABASE_URI = (
         os.environ.get('DATABASE_URL') or
-        "postgresql://postgres:johnfrancis2003@localhost:5432/predicthealth"
+        "postgresql://postgres:meiosei@localhost:5432/predicthealth"
     )
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+
+    # Email (Gmail SMTP)
+    MAIL_SERVER   = 'smtp.gmail.com'
+    MAIL_PORT     = 587
+    MAIL_USE_TLS  = True
+    MAIL_USERNAME = os.environ.get('MAIL_USERNAME') or 'predicthealth.noreply@gmail.com'
+    MAIL_PASSWORD = os.environ.get('MAIL_PASSWORD') or 'gjji dbxd ypjm wvql'  # Gmail App Password
+    MAIL_DEFAULT_SENDER = ('PredictHealth', MAIL_USERNAME)
