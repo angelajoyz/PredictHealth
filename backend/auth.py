@@ -54,7 +54,7 @@ def _send_verification_email(user):
     token = s.dumps(user.email, salt='email-verify')
 
     # Build verification URL
-    frontend_url = current_app.config.get('FRONTEND_URL', 'http://localhost:5173')
+    frontend_url = current_app.config.get('FRONTEND_URL', 'http://localhost:3000')
     verify_link = f"{frontend_url}/verify-email?token={token}"
 
     mail = current_app.extensions['mail']
