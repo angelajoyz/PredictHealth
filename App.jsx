@@ -7,6 +7,7 @@ import History from "./History";
 import Prediction from "./Prediction";
 import DataImport from "./DataImport";
 import VerifyEmail from "./VerifyEmail";
+import Register from "./Register";
 
 const theme = createTheme({
   palette: {
@@ -105,7 +106,14 @@ function App() {
       <CssBaseline />
       <div>
         {currentPage === "login" && (
-          <Login onLogin={() => handleNavigate("dashboard")} />
+          <Login
+            onLogin={() => handleNavigate("dashboard")}
+            onGoToRegister={() => setCurrentPage("register")}
+          />
+        )}
+
+        {currentPage === "register" && (
+          <Register onGoToLogin={() => setCurrentPage("login")} />
         )}
 
         {currentPage === "verify-email" && (

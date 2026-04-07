@@ -33,7 +33,7 @@ const features = [
 
 const API_BASE_URL = 'http://localhost:5000/api';
 
-const Login = ({ onLogin }) => {
+const Login = ({ onLogin, onGoToRegister }) => {
   const [username, setUsername]         = useState('');
   const [password, setPassword]         = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -263,7 +263,16 @@ const Login = ({ onLogin }) => {
             {loading ? 'Signing in…' : 'Sign In'}
           </Button>
 
-          <Typography sx={{ fontSize: 11, color: T.t4, textAlign: 'center', mt: 2.5, lineHeight: 1.6 }}>
+          <Typography sx={{ fontSize: 12, color: T.t3, textAlign: 'center', mt: 2.5 }}>
+            Don't have an account?{' '}
+            <Box component="span"
+              onClick={onGoToRegister}
+              sx={{ color: T.blue, fontWeight: 600, cursor: 'pointer', '&:hover': { textDecoration: 'underline' } }}>
+              Register
+            </Box>
+          </Typography>
+
+          <Typography sx={{ fontSize: 11, color: T.t4, textAlign: 'center', mt: 1.5, lineHeight: 1.6 }}>
             Authorized barangay health personnel only.
           </Typography>
 
