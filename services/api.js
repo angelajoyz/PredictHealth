@@ -17,10 +17,11 @@ export const healthCheck = async () => {
   }
 };
 
-export const getBarangays = async (file) => {
+export const getBarangays = async (file, { replace = false } = {}) => {
   try {
     const formData = new FormData();
     formData.append('file', file);
+    if (replace) formData.append('replace', 'true');
 
     const response = await fetch(`${API_BASE_URL}/barangays`, {
       method: 'POST',

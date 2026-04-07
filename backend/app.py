@@ -3,6 +3,8 @@ from flask_cors import CORS
 from flask_jwt_extended import JWTManager, jwt_required, get_jwt_identity
 import os
 import re
+import hashlib
+import pickle
 import pandas as pd
 from datetime import datetime, timedelta, date
 from dateutil.relativedelta import relativedelta
@@ -213,11 +215,38 @@ def get_current_user():
     return db.session.get(User, int(get_jwt_identity()))
 
 
+def _make_cache_key(barangay, city, diseases):
+    """Generate a unique cache key from forecast parameters."""
+    key_str = f"{barangay}|{city}|{','.join(sorted(diseases))}"
+    return hashlib.sha256(key_str.encode()).hexdigest()[:16]
+
+
+def _get_cache_paths(cache_key):
+    """Return (model_path, meta_path) for a given cache key."""
+    folder = app.config['MODEL_FOLDER']
+    return (
+        os.path.join(folder, f'{cache_key}.keras'),
+        os.path.join(folder, f'{cache_key}_meta.pkl'),
+    )
+
+
+def _clear_model_cache():
+    """Remove all cached models from the MODEL_FOLDER."""
+    folder = app.config['MODEL_FOLDER']
+    for fname in os.listdir(folder):
+        try:
+            os.remove(os.path.join(folder, fname))
+        except Exception:
+            pass
+    print("   \U0001f5d1\ufe0f  Model cache cleared")
+
+
 def run_lstm_for_barangay(barangay, city, target_diseases, forecast_months,
                            df_merged=None):
     """
     Run LSTM for a single barangay.
     Returns (diseases, predictions_dict, historical_dict, forecast_dates).
+    Uses cached models when available to avoid retraining.
     """
     if df_merged is None:
         aggregated = get_aggregated_data(city=city or None, barangay=barangay)
@@ -230,6 +259,39 @@ def run_lstm_for_barangay(barangay, city, target_diseases, forecast_months,
     if not diseases:
         raise ValueError('No valid disease columns found')
 
+    # ── Check cache ──────────────────────────────────────────────────────
+    cache_key = _make_cache_key(barangay, city, diseases)
+    model_path, meta_path = _get_cache_paths(cache_key)
+
+    if os.path.exists(model_path) and os.path.exists(meta_path):
+        try:
+            print(f"   \u26a1 Cache hit — loading trained model for {barangay}")
+            with open(meta_path, 'rb') as f:
+                meta = pickle.load(f)
+
+            forecaster = LSTMForecaster(
+                sequence_length=app.config['SEQUENCE_LENGTH'],
+                n_features=meta['n_features'],
+                n_outputs=len(diseases)
+            )
+            forecaster.load_model(model_path)
+
+            processor = DataProcessor(sequence_length=app.config['SEQUENCE_LENGTH'])
+            processor.scalers = meta['scalers']
+
+            predictions_scaled   = forecaster.forecast(meta['last_sequence'], n_months=forecast_months)
+            predictions_original = processor.inverse_transform_predictions(predictions_scaled, diseases)
+
+            forecast_dates   = build_forecast_dates(meta['last_date'], forecast_months)
+            predictions_dict = {d: clean_floats(predictions_original[d].tolist()) for d in diseases}
+
+            del forecaster
+            gc.collect()
+            return diseases, predictions_dict, meta['historical_dict'], forecast_dates
+        except Exception as e:
+            print(f"   \u26a0\ufe0f  Cache load failed ({e}) — retraining")
+
+    # ── No cache — full training pipeline ────────────────────────────────
     processor = DataProcessor(sequence_length=app.config['SEQUENCE_LENGTH'])
 
     if barangay == '__ALL__':
@@ -269,6 +331,22 @@ def run_lstm_for_barangay(barangay, city, target_diseases, forecast_months,
         **{d: clean_floats(df_filtered[d].fillna(0).tolist()) for d in diseases}
     }
 
+    # ── Save to cache ────────────────────────────────────────────────────
+    try:
+        forecaster.save_model(model_path)
+        with open(meta_path, 'wb') as f:
+            pickle.dump({
+                'n_features':     len(feature_cols),
+                'scalers':        processor.scalers,
+                'last_sequence':  last_sequence,
+                'last_date':      last_date,
+                'historical_dict': historical_dict,
+                'feature_cols':   feature_cols,
+            }, f)
+        print(f"   \U0001f4be Model cached for {barangay}")
+    except Exception as e:
+        print(f"   \u26a0\ufe0f  Failed to cache model: {e}")
+
     del df_filtered, scaled_data, X, y, forecaster
     gc.collect()
 
@@ -295,9 +373,15 @@ def get_barangays():
         return jsonify({'error': 'Invalid file type. Only .xlsx, .xls, and .csv are allowed'}), 400
 
     try:
+        replace_mode = request.form.get('replace', 'false').lower() == 'true'
         filename = secure_filename(file.filename)
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
+
+        if replace_mode:
+            deleted = BarangayData.query.delete()
+            db.session.commit()
+            print(f"   \U0001f5d1\ufe0f  Replace mode: deleted {deleted} old records")
 
         is_morbidity = False
         try:
@@ -399,6 +483,8 @@ def get_barangays():
 
         del df_processed
         gc.collect()
+
+        _clear_model_cache()
 
         try:
             if os.path.exists(filepath):

@@ -189,10 +189,19 @@ const DataImport = ({ onNavigate, onLogout, onDataUploaded }) => {
     ['uploadedData','cachedForecastData','cachedForecastBarangay','cachedForecastHorizon','cachedForecastDisease','dashboardSnapshot'].forEach(k => localStorage.removeItem(k));
     scannedResponse ? applyScannedResponse(file, scannedResponse) : handleFileSelection(file);
   };
-  const handleConfirmReplace = () => {
-    const { file, scannedResponse } = pendingFile; closeDialog();
+  const handleConfirmReplace = async () => {
+    const { file } = pendingFile; closeDialog();
     clearLocalStorageData();
-    scannedResponse ? applyScannedResponse(file, scannedResponse) : handleFileSelection(file);
+    setSelectedFile(file); setValidationStatus('loading');
+    setBarangays([]); setDiseaseColumns([]); setValidationErrors([]);
+    setRowCount(null); setDatasetCity(null);
+    try {
+      const [response] = await Promise.all([getBarangays(file, { replace: true }), new Promise(r => setTimeout(r, 4500))]);
+      applyScannedResponse(file, response);
+    } catch (error) {
+      setValidationStatus('error');
+      setValidationErrors([error.message]);
+    }
   };
   const handleConfirmConflictContinue = () => {
     const { file, scannedResponse } = pendingFile; closeDialog();
