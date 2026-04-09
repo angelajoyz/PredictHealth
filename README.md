@@ -32,6 +32,27 @@ Server will start at: **http://localhost:5000**
 
 ---
 
+## Environment Variables
+Create shell variables before launching the backend if you want to override defaults, or place them in `backend/.env`.
+
+- `FRONTEND_URL` — URL used in verification and password reset email links
+- `SECRET_KEY` — Flask secret key for session and token signing
+- `JWT_SECRET_KEY` — JWT signing key
+- `DATABASE_URL` — PostgreSQL connection string
+- `MAIL_USERNAME`, `MAIL_PASSWORD` — SMTP login credentials
+
+Example (Windows PowerShell):
+```powershell
+$env:FRONTEND_URL = 'http://localhost:3000'
+$env:SECRET_KEY = 'your-secret-key'
+$env:JWT_SECRET_KEY = 'your-jwt-secret'
+python app.py
+```
+
+If you prefer a file, copy `backend/.env.example` to `backend/.env` and update values.
+
+---
+
 ## Testing the API
 
 ### Test 1: Health Check

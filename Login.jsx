@@ -47,7 +47,11 @@ const features = [
 
 const API_BASE_URL = "http://localhost:5000/api";
 
-const Login = ({ onLogin, onGoToRegister }) => {
+// Props:
+//   onLogin          — called when login succeeds
+//   onGoToRegister   — called when user clicks "Register"
+//   onForgotPassword — called when user clicks "Forgot password?" (NEW)
+const Login = ({ onLogin, onGoToRegister, onForgotPassword }) => {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -78,7 +82,6 @@ const Login = ({ onLogin, onGoToRegister }) => {
         return;
       }
 
-      // ── Save token + user info to localStorage ──────────
       const token = data.access_token || data.token;
       if (!token) {
         setError("Login failed: no token received from server.");
@@ -90,8 +93,8 @@ const Login = ({ onLogin, onGoToRegister }) => {
       localStorage.setItem("username", data.user?.username || username);
       localStorage.setItem("role", data.user?.role || "staff");
       localStorage.setItem("fullName", data.user?.full_name || "");
+      localStorage.setItem("email", data.user?.email || "");
 
-      // ── Notify parent (App.jsx) that login succeeded ────
       onLogin(true);
     } catch (err) {
       console.error("Login error:", err);
@@ -403,7 +406,7 @@ const Login = ({ onLogin, onGoToRegister }) => {
           </Box>
 
           {/* Password */}
-          <Box sx={{ mb: 3 }}>
+          <Box sx={{ mb: 0.75 }}>
             <Typography
               sx={{ fontSize: 11.5, fontWeight: 600, color: T.t2, mb: 0.75 }}
             >
@@ -458,6 +461,22 @@ const Login = ({ onLogin, onGoToRegister }) => {
               }}
               sx={fieldSx}
             />
+          </Box>
+
+          {/* ── Forgot password link — NEW ── */}
+          <Box sx={{ display: "flex", justifyContent: "flex-end", mb: 2.5 }}>
+            <Typography
+              onClick={onForgotPassword}
+              sx={{
+                fontSize: 12,
+                color: T.blue,
+                fontWeight: 600,
+                cursor: "pointer",
+                "&:hover": { textDecoration: "underline" },
+              }}
+            >
+              Forgot password?
+            </Typography>
           </Box>
 
           <Button

@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager, jwt_required, get_jwt_identity
 import os
+from dotenv import load_dotenv
 import re
 import hashlib
 import pickle
@@ -23,6 +24,7 @@ from smart_health_preprocessor import SmartHealthPreprocessor
 from barangay_city_detector import detect_city_from_barangays
 
 app = Flask(__name__)
+load_dotenv()
 app.config.from_object(Config)
 
 from flask_mail import Mail
@@ -31,7 +33,9 @@ db.init_app(app)
 jwt = JWTManager(app)
 mail = Mail(app)
 
-CORS(app, origins=["http://localhost:3000", "http://localhost:5173"], supports_credentials=True)
+frontend_url = app.config.get('FRONTEND_URL', 'http://localhost:3000')
+allowed_origins = [frontend_url, "http://localhost:3000", "http://localhost:5173"]
+CORS(app, origins=list(dict.fromkeys(allowed_origins)), supports_credentials=True)
 
 app.register_blueprint(auth_bp,  url_prefix='/api/auth')
 app.register_blueprint(admin_bp, url_prefix='/api/admin')
@@ -39,6 +43,19 @@ app.register_blueprint(admin_bp, url_prefix='/api/admin')
 @app.after_request
 def after_request(response):
     return response
+
+# ── JWT error handlers — return 401 JSON instead of default HTML ──────────────
+@jwt.unauthorized_loader
+def unauthorized_callback(reason):
+    return jsonify({'error': 'Not logged in. Please log in first.', 'code': 'UNAUTHORIZED'}), 401
+
+@jwt.expired_token_loader
+def expired_token_callback(jwt_header, jwt_payload):
+    return jsonify({'error': 'Session expired. Please log in again.', 'code': 'TOKEN_EXPIRED'}), 401
+
+@jwt.invalid_token_loader
+def invalid_token_callback(reason):
+    return jsonify({'error': 'Invalid token. Please log in again.', 'code': 'INVALID_TOKEN'}), 401
 
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 os.makedirs(app.config['MODEL_FOLDER'], exist_ok=True)
@@ -73,14 +90,20 @@ def clean_floats(lst):
 
 
 def build_forecast_dates(last_date, forecast_months):
-    today = date.today()
-    current_month_start = datetime(today.year, today.month, 1)
-    if current_month_start > last_date:
-        reference = current_month_start
-    else:
-        reference = last_date
+    """Start forecasting from the month after the last available historical date."""
+    if isinstance(last_date, str):
+        try:
+            last_date = datetime.strptime(last_date[:10], '%Y-%m-%d').date()
+        except Exception:
+            last_date = date.today()
+    elif isinstance(last_date, datetime):
+        last_date = last_date.date()
+    elif not isinstance(last_date, date):
+        last_date = date.today()
+
+    reference = datetime(last_date.year, last_date.month, 1) + relativedelta(months=1)
     return [
-        (reference + relativedelta(months=i+1)).strftime('%Y-%m')
+        (reference + relativedelta(months=i)).strftime('%Y-%m')
         for i in range(forecast_months)
     ]
 
@@ -123,7 +146,6 @@ def save_forecast_flat(user_id, city, barangay, diseases, forecast_months,
         hist_vals = historical_dict.get(disease_col, [])
 
         # ── Forecast rows (one per forecast period) ──────────
-        # forecast_period is set, historical_period is NULL
         for i, period in enumerate(forecast_dates):
             predicted = float(pred_vals[i]) if i < len(pred_vals) else 0.0
             rows.append(ForecastResult(
@@ -132,14 +154,13 @@ def save_forecast_flat(user_id, city, barangay, diseases, forecast_months,
                 barangay          = barangay,
                 disease_category  = cat_key,
                 disease_label     = cat_key.replace('_', ' ').title(),
-                forecast_period   = period,   # set
+                forecast_period   = period,
                 predicted_cases   = predicted,
-                historical_period = None,     # NULL
-                historical_cases  = None,     # NULL
+                historical_period = None,
+                historical_cases  = None,
             ))
 
         # ── Historical rows (one per historical period) ──────
-        # historical_period is set, forecast_period is NULL
         for j, hperiod in enumerate(hist_dates):
             hval = float(hist_vals[j]) if j < len(hist_vals) else 0.0
             rows.append(ForecastResult(
@@ -148,9 +169,9 @@ def save_forecast_flat(user_id, city, barangay, diseases, forecast_months,
                 barangay          = barangay,
                 disease_category  = cat_key,
                 disease_label     = cat_key.replace('_', ' ').title(),
-                forecast_period   = None,     # NULL
+                forecast_period   = None,
                 predicted_cases   = 0.0,
-                historical_period = hperiod,  # set
+                historical_period = hperiod,
                 historical_cases  = hval,
             ))
 
@@ -216,13 +237,11 @@ def get_current_user():
 
 
 def _make_cache_key(barangay, city, diseases):
-    """Generate a unique cache key from forecast parameters."""
     key_str = f"{barangay}|{city}|{','.join(sorted(diseases))}"
     return hashlib.sha256(key_str.encode()).hexdigest()[:16]
 
 
 def _get_cache_paths(cache_key):
-    """Return (model_path, meta_path) for a given cache key."""
     folder = app.config['MODEL_FOLDER']
     return (
         os.path.join(folder, f'{cache_key}.keras'),
@@ -231,23 +250,17 @@ def _get_cache_paths(cache_key):
 
 
 def _clear_model_cache():
-    """Remove all cached models from the MODEL_FOLDER."""
     folder = app.config['MODEL_FOLDER']
     for fname in os.listdir(folder):
         try:
             os.remove(os.path.join(folder, fname))
         except Exception:
             pass
-    print("   \U0001f5d1\ufe0f  Model cache cleared")
+    print("   🗑️  Model cache cleared")
 
 
 def run_lstm_for_barangay(barangay, city, target_diseases, forecast_months,
                            df_merged=None):
-    """
-    Run LSTM for a single barangay.
-    Returns (diseases, predictions_dict, historical_dict, forecast_dates).
-    Uses cached models when available to avoid retraining.
-    """
     if df_merged is None:
         aggregated = get_aggregated_data(city=city or None, barangay=barangay)
         if not aggregated:
@@ -259,13 +272,12 @@ def run_lstm_for_barangay(barangay, city, target_diseases, forecast_months,
     if not diseases:
         raise ValueError('No valid disease columns found')
 
-    # ── Check cache ──────────────────────────────────────────────────────
     cache_key = _make_cache_key(barangay, city, diseases)
     model_path, meta_path = _get_cache_paths(cache_key)
 
     if os.path.exists(model_path) and os.path.exists(meta_path):
         try:
-            print(f"   \u26a1 Cache hit — loading trained model for {barangay}")
+            print(f"   ⚡ Cache hit — loading trained model for {barangay}")
             with open(meta_path, 'rb') as f:
                 meta = pickle.load(f)
 
@@ -282,6 +294,7 @@ def run_lstm_for_barangay(barangay, city, target_diseases, forecast_months,
             predictions_scaled   = forecaster.forecast(meta['last_sequence'], n_months=forecast_months)
             predictions_original = processor.inverse_transform_predictions(predictions_scaled, diseases)
 
+            # Always use current date as forecast start
             forecast_dates   = build_forecast_dates(meta['last_date'], forecast_months)
             predictions_dict = {d: clean_floats(predictions_original[d].tolist()) for d in diseases}
 
@@ -289,9 +302,8 @@ def run_lstm_for_barangay(barangay, city, target_diseases, forecast_months,
             gc.collect()
             return diseases, predictions_dict, meta['historical_dict'], forecast_dates
         except Exception as e:
-            print(f"   \u26a0\ufe0f  Cache load failed ({e}) — retraining")
+            print(f"   ⚠️  Cache load failed ({e}) — retraining")
 
-    # ── No cache — full training pipeline ────────────────────────────────
     processor = DataProcessor(sequence_length=app.config['SEQUENCE_LENGTH'])
 
     if barangay == '__ALL__':
@@ -323,6 +335,7 @@ def run_lstm_for_barangay(barangay, city, target_diseases, forecast_months,
     predictions_original = processor.inverse_transform_predictions(predictions_scaled, diseases)
 
     last_date      = df_filtered['date'].max()
+    # Always use current date as forecast start
     forecast_dates = build_forecast_dates(last_date, forecast_months)
 
     predictions_dict = {d: clean_floats(predictions_original[d].tolist()) for d in diseases}
@@ -331,7 +344,6 @@ def run_lstm_for_barangay(barangay, city, target_diseases, forecast_months,
         **{d: clean_floats(df_filtered[d].fillna(0).tolist()) for d in diseases}
     }
 
-    # ── Save to cache ────────────────────────────────────────────────────
     try:
         forecaster.save_model(model_path)
         with open(meta_path, 'wb') as f:
@@ -343,9 +355,9 @@ def run_lstm_for_barangay(barangay, city, target_diseases, forecast_months,
                 'historical_dict': historical_dict,
                 'feature_cols':   feature_cols,
             }, f)
-        print(f"   \U0001f4be Model cached for {barangay}")
+        print(f"   💾 Model cached for {barangay}")
     except Exception as e:
-        print(f"   \u26a0\ufe0f  Failed to cache model: {e}")
+        print(f"   ⚠️  Failed to cache model: {e}")
 
     del df_filtered, scaled_data, X, y, forecaster
     gc.collect()
@@ -357,6 +369,109 @@ def run_lstm_for_barangay(barangay, city, target_diseases, forecast_months,
 def health_check():
     return jsonify({'status': 'healthy', 'message': 'Backend is running'}), 200
 
+@app.route('/api/check-filename', methods=['GET'])
+@jwt_required()
+def check_filename():
+    current_user = get_current_user()
+    filename = request.args.get('filename', '').strip()
+    if not filename:
+        return jsonify({'error': 'filename is required'}), 400
+
+    secured = secure_filename(filename)
+    existing = UploadHistory.query.filter_by(
+        filename=secured, status='success'
+    ).order_by(UploadHistory.uploaded_at.desc()).first()
+
+    if not existing:
+        return jsonify({'owned_by_current_user': False, 'owned_by_other_user': False}), 200
+    if existing.user_id == current_user.id:
+        return jsonify({'owned_by_current_user': True, 'owned_by_other_user': False}), 200
+    return jsonify({'owned_by_current_user': False, 'owned_by_other_user': True}), 200
+
+
+@app.route('/api/scan-file', methods=['POST'])
+@jwt_required()
+def scan_file():
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file uploaded'}), 400
+    file = request.files['file']
+    if file.filename == '' or not allowed_file(file.filename):
+        return jsonify({'error': 'Invalid file'}), 400
+
+    filepath = None
+    try:
+        filename = secure_filename(file.filename)
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        file.save(filepath)
+
+        is_morbidity = False
+        try:
+            _peek = pd.read_excel(filepath, sheet_name=0, nrows=3, engine='openpyxl')
+            _peek.columns = [str(c).strip() for c in _peek.columns]
+            is_morbidity = is_morbidity_format(_peek)
+        except Exception:
+            is_morbidity = False
+
+        if is_morbidity:
+            df_wide, _ = parse_morbidity_file(filepath)
+            df_processed = df_wide
+        else:
+            try:
+                preprocessor = UltimateAutoPreprocessor()
+                df_processed = preprocessor.process_file(filepath)
+                if hasattr(preprocessor, 'complete_time_series'):
+                    df_processed = preprocessor.complete_time_series(df_processed)
+                else:
+                    smart = SmartHealthPreprocessor()
+                    df_processed = smart.complete_time_series(df_processed)
+            except Exception:
+                preprocessor = SmartHealthPreprocessor()
+                df_processed = preprocessor.process_file(filepath)
+                df_processed = preprocessor.complete_time_series(df_processed)
+
+        barangays = sorted(df_processed['barangay'].dropna().unique().tolist()) \
+                    if 'barangay' in df_processed.columns else ['Unknown']
+        disease_columns = [
+            c for c in df_processed.columns
+            if c.endswith('_cases') or c == 'malnutrition_prevalence_pct'
+        ]
+        city = resolve_city(df_processed, filename)
+
+        start_date = end_date = ''
+        if 'year' in df_processed.columns and 'month' in df_processed.columns:
+            df_processed['_date'] = pd.to_datetime(
+                df_processed['year'].astype(str) + '-' +
+                df_processed['month'].astype(str).str.zfill(2) + '-01',
+                errors='coerce'
+            )
+            valid_dates = df_processed.dropna(subset=['_date'])
+            if not valid_dates.empty:
+                start_date = valid_dates['_date'].min().strftime('%Y-%m-%d')
+                end_date   = valid_dates['_date'].max().strftime('%Y-%m-%d')
+
+        del df_processed
+        gc.collect()
+
+        return jsonify({
+            'barangays':      barangays,
+            'disease_columns': disease_columns,
+            'city':           city,
+            'city_detected':  bool(city),
+            'start_date':     start_date,
+            'end_date':       end_date,
+            'is_morbidity':   is_morbidity,
+        }), 200
+
+    except Exception as e:
+        import traceback
+        print(traceback.format_exc())
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if filepath and os.path.exists(filepath):
+            try:
+                os.remove(filepath)
+            except Exception:
+                pass
 
 @app.route('/api/barangays', methods=['POST'])
 @jwt_required()
@@ -381,7 +496,7 @@ def get_barangays():
         if replace_mode:
             deleted = BarangayData.query.delete()
             db.session.commit()
-            print(f"   \U0001f5d1\ufe0f  Replace mode: deleted {deleted} old records")
+            print(f"   🗑️  Replace mode: deleted {deleted} old records")
 
         is_morbidity = False
         try:
@@ -852,10 +967,6 @@ def dataset_info():
 @app.route('/api/age-sex-breakdown', methods=['GET'])
 @jwt_required()
 def age_sex_breakdown():
-    """
-    Returns age/sex breakdown for a disease category and barangay.
-    Used by Prediction page charts.
-    """
     from sqlalchemy import func
 
     category = request.args.get('category', '').strip()
@@ -884,9 +995,7 @@ def age_sex_breakdown():
             '65+':       ('age_65above_m','age_65above_f'),
         }
 
-        q = db.session.query(BarangayData).filter(
-            BarangayData.disease_category == category
-        )
+        q = db.session.query(BarangayData).filter(BarangayData.disease_category == category)
         if barangay and barangay != '__ALL__':
             q = q.filter(BarangayData.barangay.ilike(barangay))
         if city:
@@ -894,7 +1003,6 @@ def age_sex_breakdown():
 
         rows = q.all()
 
-        # Aggregate age/sex totals
         totals = {group: {'male': 0, 'female': 0} for group in age_cols}
         total_male = total_female = 0
 
@@ -930,6 +1038,105 @@ def age_sex_breakdown():
         import traceback
         print(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/upload-history', methods=['GET'])
+@jwt_required()
+def get_upload_history():
+    try:
+        uploads = UploadHistory.query.order_by(UploadHistory.uploaded_at.desc()).all()
+        return jsonify([u.to_dict() for u in uploads]), 200
+    except Exception as e:
+        import traceback
+        print(traceback.format_exc())
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/upload-history/<int:upload_id>', methods=['DELETE', 'OPTIONS'])
+@jwt_required()
+def delete_upload_history(upload_id):
+    if request.method == 'OPTIONS':
+        return '', 204
+
+    try:
+        upload = UploadHistory.query.get(upload_id)
+        if not upload:
+            return jsonify({'error': 'Upload not found'}), 404
+
+        deleted_count = BarangayData.query.filter_by(upload_id=upload_id).delete()
+        db.session.delete(upload)
+        db.session.commit()
+
+        print(f"   🗑️  Deleted upload id={upload_id} + {deleted_count} barangay records")
+        return jsonify({'message': 'Deleted successfully', 'deleted_records': deleted_count}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        import traceback
+        print(traceback.format_exc())
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/barangay-data', methods=['GET'])
+@jwt_required()
+def get_barangay_data():
+    from sqlalchemy import func
+
+    upload_id = request.args.get('upload_id', type=int)
+    if not upload_id:
+        return jsonify({'error': 'upload_id is required'}), 400
+
+    page     = request.args.get('page',     default=1,  type=int)
+    per_page = request.args.get('per_page', default=20, type=int)
+    per_page = min(per_page, 100)
+
+    barangay_filter = request.args.get('barangay', '').strip()
+    disease_filter  = request.args.get('disease',  '').strip()
+    year_filter     = request.args.get('year',     type=int)
+    month_filter    = request.args.get('month',    type=int)
+
+    try:
+        q = BarangayData.query.filter_by(upload_id=upload_id)
+
+        if barangay_filter:
+            q = q.filter(BarangayData.barangay.ilike(f'%{barangay_filter}%'))
+        if disease_filter:
+            q = q.filter(BarangayData.disease_category == disease_filter)
+        if year_filter:
+            q = q.filter(BarangayData.year == year_filter)
+        if month_filter:
+            q = q.filter(BarangayData.month == month_filter)
+
+        q = q.order_by(BarangayData.barangay, BarangayData.year, BarangayData.month, BarangayData.disease_category)
+
+        total   = q.count()
+        records = q.offset((page - 1) * per_page).limit(per_page).all()
+
+        opts_q    = BarangayData.query.filter_by(upload_id=upload_id)
+        barangays = [r[0] for r in opts_q.with_entities(BarangayData.barangay).distinct().order_by(BarangayData.barangay).all()]
+        diseases  = [r[0] for r in opts_q.with_entities(BarangayData.disease_category).distinct().order_by(BarangayData.disease_category).all()]
+        years     = [r[0] for r in opts_q.with_entities(BarangayData.year).distinct().order_by(BarangayData.year).all()]
+        months    = [r[0] for r in opts_q.with_entities(BarangayData.month).distinct().order_by(BarangayData.month).all()]
+
+        return jsonify({
+            'total':      total,
+            'page':       page,
+            'per_page':   per_page,
+            'pages':      (total + per_page - 1) // per_page,
+            'records':    [r.to_dict() for r in records],
+            'filter_options': {
+                'barangays': barangays,
+                'diseases':  diseases,
+                'years':     years,
+                'months':    months,
+            },
+        }), 200
+
+    except Exception as e:
+        import traceback
+        print(traceback.format_exc())
+        return jsonify({'error': str(e)}), 500
+
 
 if __name__ == '__main__':
     init_db(app)

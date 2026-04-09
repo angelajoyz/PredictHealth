@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import {
   Box,
   Typography,
@@ -24,11 +24,13 @@ import {
   LocationOn as LocationIcon,
   Biotech as BiotechIcon,
   Storage as StorageIcon,
-  ArrowForward as ArrowForwardIcon,
+  Cancel as CancelIcon,
+  SwapHoriz as SwapIcon,
   LocationCity as CityIcon,
+  DeleteForever as DeleteIcon,
 } from "@mui/icons-material";
 import Sidebar, { T } from "./Sidebar";
-import { getBarangays } from "./services/api";
+import { getBarangays, scanFile, checkFilename } from "./services/api";
 
 // ── Shared sub-components ─────────────────────────────────────────────────────
 const SCard = ({ children, sx = {} }) => (
@@ -107,7 +109,7 @@ const STEPS = [
   "Finalizing dataset summary…",
 ];
 
-const ProcessingIndicator = ({ fileName }) => {
+const ProcessingIndicator = ({ fileName, onCancel }) => {
   const [stepIndex, setStepIndex] = React.useState(0);
   React.useEffect(() => {
     const id = setInterval(() => {
@@ -139,7 +141,7 @@ const ProcessingIndicator = ({ fileName }) => {
             fontSize: 11,
             color: T.textMuted,
             ml: "auto",
-            maxWidth: 180,
+            maxWidth: 140,
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
@@ -147,6 +149,33 @@ const ProcessingIndicator = ({ fileName }) => {
         >
           {fileName}
         </Typography>
+        <Button
+          size="small"
+          onClick={onCancel}
+          startIcon={<CancelIcon sx={{ fontSize: "14px !important" }} />}
+          sx={{
+            ml: 0.5,
+            flexShrink: 0,
+            textTransform: "none",
+            fontSize: 11.5,
+            fontWeight: 600,
+            color: T.danger,
+            borderColor: T.dangerBorder,
+            border: `1px solid ${T.dangerBorder}`,
+            borderRadius: "6px",
+            px: 1.25,
+            py: 0.4,
+            backgroundColor: T.dangerBg,
+            "&:hover": {
+              backgroundColor: "#FEE2E2",
+              borderColor: T.danger,
+            },
+            lineHeight: 1,
+            minWidth: 0,
+          }}
+        >
+          Cancel
+        </Button>
       </Box>
       <LinearProgress
         variant="determinate"
@@ -202,6 +231,121 @@ const ProcessingIndicator = ({ fileName }) => {
                 fontWeight: i === stepIndex ? 600 : 400,
                 color:
                   i < stepIndex ? T.ok : i === stepIndex ? T.blue : T.textFaint,
+                transition: "color 0.3s",
+              }}
+            >
+              {step}
+            </Typography>
+          </Box>
+        ))}
+      </Box>
+    </Box>
+  );
+};
+
+// ── Saving indicator (used during handleSaveAndContinue) ──────────────────────
+const SAVE_STEPS = [
+  "Uploading dataset to server…",
+  "Processing health records…",
+  "Saving barangay data…",
+  "Finalizing upload…",
+];
+
+const SavingIndicator = ({ fileName }) => {
+  const [stepIndex, setStepIndex] = React.useState(0);
+  React.useEffect(() => {
+    const id = setInterval(() => {
+      setStepIndex((prev) => (prev < SAVE_STEPS.length - 1 ? prev + 1 : prev));
+    }, 1200);
+    return () => clearInterval(id);
+  }, []);
+  const progress = Math.round(((stepIndex + 1) / SAVE_STEPS.length) * 100);
+  return (
+    <Box
+      sx={{
+        p: "16px 18px",
+        borderRadius: "10px",
+        backgroundColor: T.okBg,
+        border: `1px solid ${T.okBorder}`,
+      }}
+    >
+      <Box sx={{ display: "flex", alignItems: "center", gap: 1.25, mb: 1.5 }}>
+        <CircularProgress
+          size={14}
+          thickness={5}
+          sx={{ color: T.ok, flexShrink: 0 }}
+        />
+        <Typography sx={{ fontSize: 13, fontWeight: 600, color: T.ok }}>
+          Saving to database…
+        </Typography>
+        <Typography
+          sx={{
+            fontSize: 11,
+            color: T.textMuted,
+            ml: "auto",
+            maxWidth: 140,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {fileName}
+        </Typography>
+      </Box>
+      <LinearProgress
+        variant="determinate"
+        value={progress}
+        sx={{
+          mb: 1.5,
+          height: 4,
+          borderRadius: 4,
+          backgroundColor: "rgba(34,197,94,0.12)",
+          "& .MuiLinearProgress-bar": {
+            backgroundColor: T.ok,
+            borderRadius: 4,
+            transition: "transform 1.1s ease",
+          },
+        }}
+      />
+      <Box sx={{ display: "flex", flexDirection: "column", gap: "5px" }}>
+        {SAVE_STEPS.map((step, i) => (
+          <Box key={i} sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            {i < stepIndex ? (
+              <CheckCircleIcon
+                sx={{ fontSize: 13, color: T.ok, flexShrink: 0 }}
+              />
+            ) : i === stepIndex ? (
+              <Box
+                sx={{
+                  width: 13,
+                  height: 13,
+                  borderRadius: "50%",
+                  flexShrink: 0,
+                  border: `2px solid ${T.ok}`,
+                  animation: "diPulse 1s ease-in-out infinite",
+                  "@keyframes diPulse": {
+                    "0%,100%": { opacity: 1 },
+                    "50%": { opacity: 0.35 },
+                  },
+                }}
+              />
+            ) : (
+              <Box
+                sx={{
+                  width: 13,
+                  height: 13,
+                  borderRadius: "50%",
+                  flexShrink: 0,
+                  border: `1.5px solid rgba(34,197,94,0.2)`,
+                }}
+              />
+            )}
+            <Typography
+              sx={{
+                fontSize: 12,
+                fontWeight: i === stepIndex ? 600 : 400,
+                color:
+                  i < stepIndex ? T.ok : i === stepIndex ? T.ok : T.textFaint,
                 transition: "color 0.3s",
               }}
             >
@@ -302,7 +446,7 @@ const PreviewTile = ({
 const DataImport = ({ onNavigate, onLogout, onDataUploaded }) => {
   const [dragActive, setDragActive] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null);
-  const [validationStatus, setValidationStatus] = useState(null);
+  const [validationStatus, setValidationStatus] = useState(null); // null | "loading" | "success" | "error" | "saving"
   const [validationErrors, setValidationErrors] = useState([]);
   const [barangays, setBarangays] = useState([]);
   const [diseaseColumns, setDiseaseColumns] = useState([]);
@@ -312,6 +456,55 @@ const DataImport = ({ onNavigate, onLogout, onDataUploaded }) => {
   const [pendingFile, setPendingFile] = useState(null);
   const [dialogMeta, setDialogMeta] = useState(null);
 
+  const [sameFileDialogOpen, setSameFileDialogOpen] = useState(false);
+  const [pendingSameFile, setPendingSameFile] = useState(null);
+
+  const [crossAccountDialogOpen, setCrossAccountDialogOpen] = useState(false);
+  const [pendingCrossAccountFile, setPendingCrossAccountFile] = useState(null);
+
+  // cancelledRef: set to true any time we want in-flight async work to no-op
+  const cancelledRef = useRef(false);
+
+  // ── Full UI + storage reset ───────────────────────────────────────────────
+  const resetAll = () => {
+    cancelledRef.current = true;
+    setSelectedFile(null);
+    setValidationStatus(null);
+    setValidationErrors([]);
+    setBarangays([]);
+    setDiseaseColumns([]);
+    setRowCount(null);
+    setDatasetCity(null);
+  };
+
+  const clearLocalStorageData = () => {
+    [
+      "uploadedData",
+      "availableBarangays",
+      "diseaseColumns",
+      "forecastHistory",
+      "cachedForecastData",
+      "cachedForecastBarangay",
+      "cachedForecastHorizon",
+      "cachedForecastDisease",
+      "dashboardSnapshot",
+      "datasetCity",
+      "datasetStartDate",
+      "datasetEndDate",
+    ].forEach((k) => localStorage.removeItem(k));
+  };
+
+  // ── Cancel upload (during processing indicator) ───────────────────────────
+  const handleCancelUpload = () => {
+    resetAll();
+  };
+
+  // ── Step 3: discard everything and return to upload state ─────────────────
+  const handleDiscardAndCancel = () => {
+    resetAll();
+    clearLocalStorageData();
+  };
+
   // ── Drag handlers ─────────────────────────────────────────────────────────
   const handleDrag = (e) => {
     e.preventDefault();
@@ -319,21 +512,24 @@ const DataImport = ({ onNavigate, onLogout, onDataUploaded }) => {
     if (e.type === "dragenter" || e.type === "dragover") setDragActive(true);
     else if (e.type === "dragleave") setDragActive(false);
   };
+
   const handleDrop = (e) => {
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
     if (e.dataTransfer.files?.[0]) trySelectFile(e.dataTransfer.files[0]);
   };
+
   const handleFileInput = (e) => {
     if (e.target.files?.[0]) trySelectFile(e.target.files[0]);
     e.target.value = "";
   };
 
-  // ── Smart detection ───────────────────────────────────────────────────────
+  // ── Smart detection — uses scanFile (no DB write) ─────────────────────────
   const detectDialogType = async (file) => {
     try {
-      const response = await getBarangays(file);
+      // scanFile only parses the file — never writes to DB
+      const response = await scanFile(file);
       const newBarangays = response.barangays || [];
       const newDiseases = response.disease_columns || [];
       const existingBarangays = JSON.parse(
@@ -363,25 +559,113 @@ const DataImport = ({ onNavigate, onLogout, onDataUploaded }) => {
     }
   };
 
-  const trySelectFile = (file) => {
+  // ── trySelectFile ─────────────────────────────────────────────────────────
+  // Cross-account check hits the DB via /api/check-filename (not localStorage).
+  // All scan calls use scanFile() which never writes to DB.
+  // DB write only happens in handleSaveAndContinue via getBarangays().
+  const trySelectFile = async (file) => {
+    setSelectedFile(file);
+    setValidationStatus("loading");
+    cancelledRef.current = false;
+
+    // ── 1. Cross-account + same-account check via DB (runs FIRST) ────────
+    try {
+      const check = await checkFilename(file.name);
+      if (cancelledRef.current) return;
+
+      if (check.owned_by_other_user) {
+        setPendingCrossAccountFile(file);
+        setValidationStatus(null);
+        setSelectedFile(null);
+        setCrossAccountDialogOpen(true);
+        return;
+      }
+
+      if (check.owned_by_current_user) {
+        setPendingSameFile(file);
+        setValidationStatus(null);
+        setSelectedFile(null);
+        setSameFileDialogOpen(true);
+        return;
+      }
+    } catch {
+      // If check-filename fails (network etc.), fall through to normal flow
+    }
+
+    if (cancelledRef.current) return;
+
+    // ── 2. Existing local dataset → smart detection dialog ────────────────
     const existingData = localStorage.getItem("uploadedData");
     const existingHistory = localStorage.getItem("forecastHistory");
     const hasExisting =
       existingData ||
       (existingHistory && JSON.parse(existingHistory)?.length > 0);
-    if (hasExisting) detectDialogType(file);
-    else handleFileSelection(file);
+
+    if (hasExisting) {
+      detectDialogType(file).then(() => {
+        if (!cancelledRef.current) {
+          setValidationStatus(null);
+          setSelectedFile(null);
+        }
+      });
+    } else {
+      // Fresh upload — scan only (no DB write yet)
+      handleFileSelection(file);
+    }
   };
 
+  // ── Same-file dialog handlers ─────────────────────────────────────────────
+  const closeSameFileDialog = () => {
+    setSameFileDialogOpen(false);
+    setPendingSameFile(null);
+    cancelledRef.current = true;
+  };
+
+  const handleConfirmSameFile = () => {
+    const file = pendingSameFile;
+    setSameFileDialogOpen(false);
+    setPendingSameFile(null);
+    clearLocalStorageData();
+    cancelledRef.current = false;
+    setSelectedFile(file);
+    setValidationStatus("loading");
+    handleFileSelection(file);
+  };
+
+  // ── Cross-account dialog handlers ─────────────────────────────────────────
+  const closeCrossAccountDialog = () => {
+    setCrossAccountDialogOpen(false);
+    setPendingCrossAccountFile(null);
+    cancelledRef.current = true;
+  };
+
+  const handleConfirmCrossAccountReplace = () => {
+    const file = pendingCrossAccountFile;
+    setCrossAccountDialogOpen(false);
+    setPendingCrossAccountFile(null);
+    clearLocalStorageData();
+    cancelledRef.current = false;
+    setSelectedFile(file);
+    setValidationStatus("loading");
+    handleFileSelection(file);
+  };
+
+  // ── Smart dataset dialog handlers ─────────────────────────────────────────
   const closeDialog = () => {
     setDialogType(null);
     setPendingFile(null);
     setDialogMeta(null);
+    cancelledRef.current = true;
+    setSelectedFile(null);
+    setValidationStatus(null);
+    setValidationErrors([]);
   };
 
   const handleConfirmExtend = () => {
     const { file, scannedResponse } = pendingFile;
-    closeDialog();
+    setDialogType(null);
+    setPendingFile(null);
+    setDialogMeta(null);
     [
       "uploadedData",
       "cachedForecastData",
@@ -390,14 +674,27 @@ const DataImport = ({ onNavigate, onLogout, onDataUploaded }) => {
       "cachedForecastDisease",
       "dashboardSnapshot",
     ].forEach((k) => localStorage.removeItem(k));
-    scannedResponse
-      ? applyScannedResponse(file, scannedResponse)
-      : handleFileSelection(file);
+    cancelledRef.current = false;
+    if (scannedResponse) {
+      setSelectedFile(file);
+      setValidationStatus("loading");
+      setTimeout(() => {
+        if (!cancelledRef.current) applyScannedResponse(file, scannedResponse);
+      }, 500);
+    } else {
+      setSelectedFile(file);
+      setValidationStatus("loading");
+      handleFileSelection(file);
+    }
   };
+
   const handleConfirmReplace = async () => {
     const { file } = pendingFile;
-    closeDialog();
+    setDialogType(null);
+    setPendingFile(null);
+    setDialogMeta(null);
     clearLocalStorageData();
+    cancelledRef.current = false;
     setSelectedFile(file);
     setValidationStatus("loading");
     setBarangays([]);
@@ -405,20 +702,15 @@ const DataImport = ({ onNavigate, onLogout, onDataUploaded }) => {
     setValidationErrors([]);
     setRowCount(null);
     setDatasetCity(null);
-    try {
-      const [response] = await Promise.all([
-        getBarangays(file, { replace: true }),
-        new Promise((r) => setTimeout(r, 4500)),
-      ]);
-      applyScannedResponse(file, response);
-    } catch (error) {
-      setValidationStatus("error");
-      setValidationErrors([error.message]);
-    }
+    // Scan only — no DB write yet
+    handleFileSelection(file);
   };
+
   const handleConfirmConflictContinue = () => {
     const { file, scannedResponse } = pendingFile;
-    closeDialog();
+    setDialogType(null);
+    setPendingFile(null);
+    setDialogMeta(null);
     [
       "uploadedData",
       "cachedForecastData",
@@ -427,11 +719,22 @@ const DataImport = ({ onNavigate, onLogout, onDataUploaded }) => {
       "cachedForecastDisease",
       "dashboardSnapshot",
     ].forEach((k) => localStorage.removeItem(k));
-    scannedResponse
-      ? applyScannedResponse(file, scannedResponse)
-      : handleFileSelection(file);
+    cancelledRef.current = false;
+    if (scannedResponse) {
+      setSelectedFile(file);
+      setValidationStatus("loading");
+      setTimeout(() => {
+        if (!cancelledRef.current) applyScannedResponse(file, scannedResponse);
+      }, 500);
+    } else {
+      setSelectedFile(file);
+      setValidationStatus("loading");
+      handleFileSelection(file);
+    }
   };
 
+  // ── Apply a previously scanned response to UI state ───────────────────────
+  // Does NOT write to DB — only updates localStorage preview keys and UI.
   const applyScannedResponse = (file, response) => {
     setSelectedFile(file);
     const receivedBarangays = response.barangays || [];
@@ -440,6 +743,7 @@ const DataImport = ({ onNavigate, onLogout, onDataUploaded }) => {
     setDiseaseColumns(receivedDiseases);
     if (response.row_count != null) setRowCount(response.row_count);
     if (response.city) setDatasetCity(response.city);
+    // Store preview info in localStorage (not the actual data upload)
     if (receivedBarangays.length > 0)
       localStorage.setItem(
         "availableBarangays",
@@ -455,23 +759,7 @@ const DataImport = ({ onNavigate, onLogout, onDataUploaded }) => {
     setValidationStatus("success");
   };
 
-  const clearLocalStorageData = () => {
-    [
-      "uploadedData",
-      "availableBarangays",
-      "diseaseColumns",
-      "forecastHistory",
-      "cachedForecastData",
-      "cachedForecastBarangay",
-      "cachedForecastHorizon",
-      "cachedForecastDisease",
-      "dashboardSnapshot",
-      "datasetCity",
-      "datasetStartDate",
-      "datasetEndDate",
-    ].forEach((k) => localStorage.removeItem(k));
-  };
-
+  // ── handleFileSelection — uses scanFile (no DB write) ────────────────────
   const handleFileSelection = async (file) => {
     if (!validateFileType(file)) {
       setSelectedFile(file);
@@ -489,24 +777,26 @@ const DataImport = ({ onNavigate, onLogout, onDataUploaded }) => {
       ]);
       return;
     }
-    setSelectedFile(file);
-    setValidationStatus("loading");
+    cancelledRef.current = false;
     setBarangays([]);
     setDiseaseColumns([]);
     setValidationErrors([]);
     setRowCount(null);
     setDatasetCity(null);
     try {
+      // scanFile → no DB writes, just parse + return metadata
       const [response] = await Promise.all([
-        getBarangays(file),
+        scanFile(file),
         new Promise((r) => setTimeout(r, 4500)),
       ]);
+      if (cancelledRef.current) return;
       const receivedBarangays = response.barangays || [];
       const receivedDiseases = response.disease_columns || [];
       setBarangays(receivedBarangays);
       setDiseaseColumns(receivedDiseases);
       if (response.row_count != null) setRowCount(response.row_count);
       if (response.city) setDatasetCity(response.city);
+      // Preview keys only — actual save deferred to Step 3
       if (receivedBarangays.length > 0)
         localStorage.setItem(
           "availableBarangays",
@@ -524,6 +814,7 @@ const DataImport = ({ onNavigate, onLogout, onDataUploaded }) => {
         localStorage.setItem("datasetEndDate", response.end_date);
       setValidationStatus("success");
     } catch (error) {
+      if (cancelledRef.current) return;
       setValidationStatus("error");
       setValidationErrors([error.message]);
     }
@@ -540,21 +831,48 @@ const DataImport = ({ onNavigate, onLogout, onDataUploaded }) => {
     clearLocalStorageData();
   };
 
-  const handleSaveAndContinue = () => {
-    const now = new Date().toISOString();
-    // I-save sa localStorage MUNA
-    localStorage.setItem(
-      "uploadedData",
-      JSON.stringify({
-        fileName: selectedFile.name,
-        fileSize: selectedFile.size,
-        uploadDate: now,
-      }),
-    );
-    // I-update ang App.jsx state
-    if (onDataUploaded) onDataUploaded({ file: selectedFile, uploadDate: now });
-    // Mag-navigate AFTER state update — gamit ang setTimeout para masigurong na-update na ang state
-    setTimeout(() => onNavigate?.("dashboard"), 50);
+  // ── handleSaveAndContinue — THIS is where the actual DB write happens ─────
+  const handleSaveAndContinue = async () => {
+    try {
+      setValidationStatus("saving");
+      // getBarangays → hits /api/barangays → writes UploadHistory + BarangayData to DB
+      const response = await getBarangays(selectedFile);
+      if (cancelledRef.current) return;
+      const now = new Date().toISOString();
+      localStorage.setItem(
+        "uploadedData",
+        JSON.stringify({
+          fileName: selectedFile.name,
+          fileSize: selectedFile.size,
+          uploadDate: now,
+          uploadId: response.upload_id,
+        }),
+      );
+      // Update localStorage with the freshly saved data's metadata
+      if (response.barangays?.length > 0)
+        localStorage.setItem(
+          "availableBarangays",
+          JSON.stringify(response.barangays),
+        );
+      if (response.disease_columns?.length > 0)
+        localStorage.setItem(
+          "diseaseColumns",
+          JSON.stringify(response.disease_columns),
+        );
+      if (response.city) localStorage.setItem("datasetCity", response.city);
+      if (response.start_date)
+        localStorage.setItem("datasetStartDate", response.start_date);
+      if (response.end_date)
+        localStorage.setItem("datasetEndDate", response.end_date);
+      if (onDataUploaded) onDataUploaded({ file: selectedFile, uploadDate: now });
+      setTimeout(() => onNavigate?.("dashboard"), 50);
+    } catch (error) {
+      if (cancelledRef.current) return;
+      setValidationStatus("error");
+      setValidationErrors([
+        error.message || "Failed to save dataset. Please try again.",
+      ]);
+    }
   };
 
   return (
@@ -569,7 +887,7 @@ const DataImport = ({ onNavigate, onLogout, onDataUploaded }) => {
       <Box
         sx={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}
       >
-        {/* Sticky header — border removed */}
+        {/* Sticky header */}
         <Box
           sx={{
             px: "24px",
@@ -735,27 +1053,31 @@ const DataImport = ({ onNavigate, onLogout, onDataUploaded }) => {
                           " · near size limit"}
                       </Typography>
                     </Box>
-                    {validationStatus !== "loading" && (
-                      <Box
-                        onClick={handleRemoveFile}
-                        sx={{
-                          cursor: "pointer",
-                          p: 0.5,
-                          borderRadius: "4px",
-                          color: T.textMuted,
-                          "&:hover": {
-                            color: T.danger,
-                            backgroundColor: T.dangerBg,
-                          },
-                        }}
-                      >
-                        <CloseIcon sx={{ fontSize: 16 }} />
-                      </Box>
-                    )}
+                    {validationStatus !== "loading" &&
+                      validationStatus !== "saving" && (
+                        <Box
+                          onClick={handleRemoveFile}
+                          sx={{
+                            cursor: "pointer",
+                            p: 0.5,
+                            borderRadius: "4px",
+                            color: T.textMuted,
+                            "&:hover": {
+                              color: T.danger,
+                              backgroundColor: T.dangerBg,
+                            },
+                          }}
+                        >
+                          <CloseIcon sx={{ fontSize: 16 }} />
+                        </Box>
+                      )}
                   </Box>
 
                   {validationStatus === "loading" && (
-                    <ProcessingIndicator fileName={selectedFile.name} />
+                    <ProcessingIndicator
+                      fileName={selectedFile.name}
+                      onCancel={handleCancelUpload}
+                    />
                   )}
 
                   {validationStatus === "error" && (
@@ -828,8 +1150,8 @@ const DataImport = ({ onNavigate, onLogout, onDataUploaded }) => {
           </SCard>
 
           {/* Step 2 */}
-          {validationStatus === "success" && (
-            <SCard sx={{ mb: "14px" }}>
+          {(validationStatus === "success" || validationStatus === "saving") && (
+            <SCard sx={{ mb: "14px", opacity: validationStatus === "saving" ? 0.6 : 1, pointerEvents: validationStatus === "saving" ? "none" : "auto" }}>
               <CardContent sx={{ p: 2.25, "&:last-child": { pb: 2.25 } }}>
                 <CardHead
                   title="Step 2: Dataset Summary"
@@ -965,53 +1287,285 @@ const DataImport = ({ onNavigate, onLogout, onDataUploaded }) => {
           )}
 
           {/* Step 3 */}
-          {validationStatus === "success" && (
+          {(validationStatus === "success" || validationStatus === "saving") && (
             <SCard>
               <CardContent sx={{ p: 2.25, "&:last-child": { pb: 2.25 } }}>
                 <CardHead
                   title="Step 3: Save & Continue"
                   icon={<CloudDoneIcon sx={{ fontSize: 16 }} />}
                 />
-                <Button
-                  variant="contained"
-                  size="large"
-                  fullWidth
-                  onClick={handleSaveAndContinue}
-                  sx={{
-                    backgroundColor: T.blue,
-                    color: "#fff",
-                    textTransform: "none",
-                    fontWeight: 600,
-                    fontSize: 13.5,
-                    borderRadius: "8px",
-                    py: 1.25,
-                    boxShadow: "0 2px 10px rgba(27,79,138,0.25)",
-                    "&:hover": {
-                      backgroundColor: T.blueMid,
-                      boxShadow: "0 3px 14px rgba(27,79,138,0.32)",
-                    },
-                  }}
-                >
-                  Save & Go to Dashboard
-                </Button>
-                <Typography
-                  sx={{
-                    fontSize: 11.5,
-                    color: T.textFaint,
-                    textAlign: "center",
-                    mt: 1.5,
-                  }}
-                >
-                  Your dataset will be saved — generate forecasts from the
-                  Dashboard
-                </Typography>
+
+                {validationStatus === "saving" ? (
+                  <SavingIndicator fileName={selectedFile.name} />
+                ) : (
+                  <>
+                    <Button
+                      variant="contained"
+                      size="large"
+                      fullWidth
+                      onClick={handleSaveAndContinue}
+                      sx={{
+                        backgroundColor: T.blue,
+                        color: "#fff",
+                        textTransform: "none",
+                        fontWeight: 600,
+                        fontSize: 13.5,
+                        borderRadius: "8px",
+                        py: 1.25,
+                        boxShadow: "0 2px 10px rgba(27,79,138,0.25)",
+                        "&:hover": {
+                          backgroundColor: T.blueMid,
+                          boxShadow: "0 3px 14px rgba(27,79,138,0.32)",
+                        },
+                      }}
+                    >
+                      Save & Go to Dashboard
+                    </Button>
+
+                    <Button
+                      variant="outlined"
+                      size="large"
+                      fullWidth
+                      onClick={handleDiscardAndCancel}
+                      startIcon={<DeleteIcon sx={{ fontSize: 16 }} />}
+                      sx={{
+                        mt: 1.25,
+                        textTransform: "none",
+                        fontWeight: 600,
+                        fontSize: 13,
+                        borderRadius: "8px",
+                        py: 1.1,
+                        color: T.danger,
+                        borderColor: T.dangerBorder,
+                        backgroundColor: T.dangerBg,
+                        "&:hover": {
+                          backgroundColor: "#FEE2E2",
+                          borderColor: T.danger,
+                        },
+                      }}
+                    >
+                      Cancel & Discard Upload
+                    </Button>
+
+                    <Typography
+                      sx={{
+                        fontSize: 11.5,
+                        color: T.textFaint,
+                        textAlign: "center",
+                        mt: 1.5,
+                      }}
+                    >
+                      Cancelling will remove all scanned data — nothing will be
+                      saved to the database.
+                    </Typography>
+                  </>
+                )}
               </CardContent>
             </SCard>
           )}
         </Box>
       </Box>
 
-      {/* Smart Dataset Dialog */}
+      {/* ── Same File Dialog (own account) ─────────────────────────────────── */}
+      <Dialog
+        open={sameFileDialogOpen}
+        onClose={closeSameFileDialog}
+        maxWidth="xs"
+        fullWidth
+        PaperProps={{
+          sx: { borderRadius: "12px", border: `1px solid ${T.border}` },
+        }}
+      >
+        <DialogTitle
+          sx={{
+            fontSize: 15,
+            fontWeight: 700,
+            color: T.textHead,
+            pb: 1,
+            display: "flex",
+            alignItems: "center",
+            gap: 1,
+          }}
+        >
+          <WarningIcon sx={{ fontSize: 18, color: T.warnAccent }} /> File
+          Already Uploaded
+        </DialogTitle>
+        <Box sx={{ borderBottom: `1px solid ${T.borderSoft}`, mx: 3 }} />
+        <DialogContent sx={{ pt: 2.5 }}>
+          <Typography
+            sx={{ fontSize: 13, color: T.textBody, lineHeight: 1.7, mb: 1.5 }}
+          >
+            <strong>{pendingSameFile?.name}</strong> is already your active
+            dataset. Re-uploading will replace it and clear all existing
+            forecasts.
+          </Typography>
+          <Box
+            sx={{
+              p: "10px 14px",
+              borderRadius: "8px",
+              backgroundColor: T.dangerBg,
+              border: `1px solid ${T.dangerBorder}`,
+            }}
+          >
+            <Typography
+              sx={{
+                fontSize: 12.5,
+                color: T.danger,
+                fontWeight: 600,
+                mb: 0.5,
+              }}
+            >
+              This will permanently clear:
+            </Typography>
+            <Typography sx={{ fontSize: 12, color: T.danger }}>
+              • All previous forecast history
+            </Typography>
+            <Typography sx={{ fontSize: 12, color: T.danger }}>
+              • Cached predictions and barangay data
+            </Typography>
+          </Box>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2.5, gap: 1 }}>
+          <Button
+            onClick={closeSameFileDialog}
+            sx={{
+              borderRadius: "8px",
+              textTransform: "none",
+              fontSize: 13,
+              color: T.textMuted,
+              border: `1px solid ${T.border}`,
+              px: 2,
+            }}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            onClick={handleConfirmSameFile}
+            sx={{
+              borderRadius: "8px",
+              textTransform: "none",
+              fontSize: 13,
+              fontWeight: 600,
+              backgroundColor: T.danger,
+              "&:hover": { backgroundColor: "#B91C1C" },
+              px: 2,
+            }}
+          >
+            Yes, Re-upload
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* ── Cross-Account Same File Dialog ─────────────────────────────────── */}
+      <Dialog
+        open={crossAccountDialogOpen}
+        onClose={closeCrossAccountDialog}
+        maxWidth="xs"
+        fullWidth
+        PaperProps={{
+          sx: { borderRadius: "12px", border: `1px solid ${T.border}` },
+        }}
+      >
+        <DialogTitle
+          sx={{
+            fontSize: 15,
+            fontWeight: 700,
+            color: T.textHead,
+            pb: 1,
+            display: "flex",
+            alignItems: "center",
+            gap: 1,
+          }}
+        >
+          <SwapIcon sx={{ fontSize: 18, color: T.warnAccent }} /> File Already
+          Used by Another Account
+        </DialogTitle>
+        <Box sx={{ borderBottom: `1px solid ${T.borderSoft}`, mx: 3 }} />
+        <DialogContent sx={{ pt: 2.5 }}>
+          <Typography
+            sx={{ fontSize: 13, color: T.textBody, lineHeight: 1.7, mb: 1.5 }}
+          >
+            <strong>{pendingCrossAccountFile?.name}</strong> is already uploaded
+            and active in another account. Do you want to use this file for your
+            account instead?
+          </Typography>
+          <Box
+            sx={{
+              p: "10px 14px",
+              borderRadius: "8px",
+              backgroundColor: T.warnBg,
+              border: `1px solid ${T.warnBorder}`,
+              mb: 1.5,
+            }}
+          >
+            <Typography
+              sx={{
+                fontSize: 12.5,
+                color: T.warnAccent,
+                fontWeight: 600,
+                mb: 0.5,
+              }}
+            >
+              What happens if you proceed:
+            </Typography>
+            <Typography sx={{ fontSize: 12, color: T.warnAccent }}>
+              • This file will be linked to your account
+            </Typography>
+            <Typography sx={{ fontSize: 12, color: T.warnAccent }}>
+              • The other account's dataset will not be affected
+            </Typography>
+            <Typography sx={{ fontSize: 12, color: T.warnAccent }}>
+              • Your existing forecasts (if any) will be cleared
+            </Typography>
+          </Box>
+          <Box
+            sx={{
+              p: "10px 14px",
+              borderRadius: "8px",
+              backgroundColor: T.blueDim,
+              border: `1px solid rgba(27,79,138,0.18)`,
+            }}
+          >
+            <Typography sx={{ fontSize: 12, color: T.blue, lineHeight: 1.6 }}>
+              If you meant to upload a <strong>different</strong> file, press
+              Cancel and select the correct file.
+            </Typography>
+          </Box>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2.5, gap: 1 }}>
+          <Button
+            onClick={closeCrossAccountDialog}
+            sx={{
+              borderRadius: "8px",
+              textTransform: "none",
+              fontSize: 13,
+              color: T.textMuted,
+              border: `1px solid ${T.border}`,
+              px: 2,
+            }}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            onClick={handleConfirmCrossAccountReplace}
+            sx={{
+              borderRadius: "8px",
+              textTransform: "none",
+              fontSize: 13,
+              fontWeight: 600,
+              backgroundColor: T.warnAccent,
+              "&:hover": { backgroundColor: "#B45309" },
+              px: 2,
+            }}
+          >
+            Yes, Use This File
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* ── Smart Dataset Dialog ────────────────────────────────────────────── */}
       <Dialog
         open={!!dialogType}
         onClose={closeDialog}

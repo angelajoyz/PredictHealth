@@ -7,12 +7,24 @@ const getAuthHeaders = () => {
   return { Authorization: `Bearer ${token}` };
 };
 
-export const healthCheck = async () => {
+export const getCurrentUser = async () => {
   try {
-    const response = await fetch(`${API_BASE_URL}/health`);
+    const response = await fetch(`${API_BASE_URL}/auth/me`, {
+      method: "GET",
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        localStorage.removeItem("token");
+        throw new Error("Session expired. Please log in again.");
+      }
+      throw new Error("Failed to get user info");
+    }
+
     return await response.json();
   } catch (error) {
-    console.error("Health check failed:", error);
+    console.error("Get current user failed:", error);
     throw error;
   }
 };
@@ -284,6 +296,50 @@ export const getAgeSexBreakdown = async (
     return await response.json();
   } catch (error) {
     console.error("Age/sex breakdown failed:", error);
+    throw error;
+  }
+};
+
+export const checkFilename = async (filename) => {
+  try {
+    const params = new URLSearchParams({ filename });
+    const response = await fetch(`${API_BASE_URL}/check-filename?${params}`, {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) {
+      if (response.status === 401) {
+        localStorage.removeItem("token");
+        throw new Error("Session expired. Please log in again.");
+      }
+      throw new Error("Failed to check filename");
+    }
+    return await response.json();
+  } catch (error) {
+    console.error("Check filename failed:", error);
+    throw error;
+  }
+};
+
+export const scanFile = async (file) => {
+  try {
+    const formData = new FormData();
+    formData.append("file", file);
+    const response = await fetch(`${API_BASE_URL}/scan-file`, {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: formData,
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      if (response.status === 401) {
+        localStorage.removeItem("token");
+        throw new Error("Session expired. Please log in again.");
+      }
+      throw new Error(error.error || "Failed to scan file");
+    }
+    return await response.json();
+  } catch (error) {
+    console.error("Scan file failed:", error);
     throw error;
   }
 };

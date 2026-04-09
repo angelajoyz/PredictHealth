@@ -23,6 +23,9 @@ import {
   TrendingDown as TrendingDownIcon,
   Remove as RemoveIcon,
   Info as InfoIcon,
+  ChevronLeft as ChevronLeftIcon,
+  ChevronRight as ChevronRightIcon,
+  FilterList as FilterListIcon,
 } from '@mui/icons-material';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
@@ -32,6 +35,17 @@ import {
 import Sidebar, { T } from './Sidebar';
 
 const ALL_BARANGAYS = '__ALL__';
+const ROWS_PER_PAGE = 20;
+
+const MONTH_NAMES = [
+  'January','February','March','April','May','June',
+  'July','August','September','October','November','December'
+];
+
+const MONTH_SHORT = [
+  'Jan','Feb','Mar','Apr','May','Jun',
+  'Jul','Aug','Sep','Oct','Nov','Dec'
+];
 
 const DISEASE_DISPLAY_MAP = {
   dengue_cases:                { label: 'Dengue',           color: T.blue,       icon: '🦟' },
@@ -94,9 +108,7 @@ const formatMonthLabel = (period) => {
   if (!period) return period;
   const m = period.match(/^(\d{4})-(\d{2})/);
   if (m) {
-    const months = ['January','February','March','April','May','June',
-                    'July','August','September','October','November','December'];
-    return months[parseInt(m[2], 10) - 1] ?? period;
+    return MONTH_NAMES[parseInt(m[2], 10) - 1] ?? period;
   }
   return period;
 };
@@ -106,13 +118,35 @@ const getPeriodYear = (period) => {
   return m ? m[1] : null;
 };
 
+const getPeriodMonth = (period) => {
+  const m = period?.match(/^\d{4}-(\d{2})/);
+  return m ? m[1] : null;
+};
+
 const tooltipStyle = {
   borderRadius: '8px', border: `1px solid ${T.border}`,
   boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
   fontSize: 12, color: T.textBody, background: '#FFFFFF',
 };
 
-// ── Trend Legend (for Detail Panel) ──────────────────────────────────────────
+const computeTrendPct = (first, last) => {
+  if (first === 0 && last === 0) return 'stable';
+  if (first === 0) return last > 0 ? 'increasing' : 'stable';
+  const pct = ((last - first) / first) * 100;
+  if (pct > 10)  return 'increasing';
+  if (pct < -10) return 'decreasing';
+  return 'stable';
+};
+
+const getTrendFromEntries = (diseaseEntries) => {
+  if (!diseaseEntries || diseaseEntries.length < 2) return 'stable';
+  const sorted = [...diseaseEntries].sort((a, b) => a.period.localeCompare(b.period));
+  const first  = sorted[0].predictedValue ?? 0;
+  const last   = sorted[sorted.length - 1].predictedValue ?? 0;
+  return computeTrendPct(first, last);
+};
+
+// ── Trend Legend ──────────────────────────────────────────────────────────────
 const TrendLegend = ({ showThresholds = false }) => (
   <Box>
     <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
@@ -132,33 +166,77 @@ const TrendLegend = ({ showThresholds = false }) => (
       ))}
     </Box>
     {showThresholds && (
-      <Box sx={{ mt: 1.25, p: '8px 12px', borderRadius: '6px',
+      <Box sx={{ mt: 1.25, p: '10px 14px', borderRadius: '8px',
         backgroundColor: '#F8FAFC', border: `1px solid ${T.borderSoft}` }}>
-        <Typography sx={{ fontSize: 11, color: T.textMuted, fontWeight: 600, mb: 0.5 }}>
-          How trend is determined (last vs first forecast month):
+        <Typography sx={{ fontSize: 11, color: T.textMuted, fontWeight: 600, mb: 0.75 }}>
+          How trend is determined — comparing first vs. last forecasted month:
         </Typography>
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.25 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
-            <TrendingUpIcon sx={{ fontSize: 11, color: T.danger }} />
-            <Typography sx={{ fontSize: 11, color: T.textBody }}>
-              <strong style={{ color: T.danger }}>Increasing</strong> — difference &gt; +0.5 cases
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+          <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.75 }}>
+            <TrendingUpIcon sx={{ fontSize: 12, color: T.danger, mt: '1px', flexShrink: 0 }} />
+            <Typography sx={{ fontSize: 11, color: T.textBody, lineHeight: 1.5 }}>
+              <strong style={{ color: T.danger }}>Increasing</strong>
+              {' '}— predicted cases increased by <strong>more than 10%</strong> from the first to the last forecast month.
+              {' '}<span style={{ color: T.textFaint }}>(e.g. 100 → 111+ cases)</span>
             </Typography>
           </Box>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
-            <RemoveIcon sx={{ fontSize: 11, color: T.textMuted }} />
-            <Typography sx={{ fontSize: 11, color: T.textBody }}>
-              <strong style={{ color: T.textMuted }}>Stable</strong> — difference between −0.5 and +0.5 cases
+          <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.75 }}>
+            <RemoveIcon sx={{ fontSize: 12, color: T.textMuted, mt: '1px', flexShrink: 0 }} />
+            <Typography sx={{ fontSize: 11, color: T.textBody, lineHeight: 1.5 }}>
+              <strong style={{ color: T.textMuted }}>Stable</strong>
+              {' '}— change is within <strong>±10%</strong> of the first forecast value.
+              {' '}<span style={{ color: T.textFaint }}>(e.g. 100 → 90–110 cases)</span>
             </Typography>
           </Box>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
-            <TrendingDownIcon sx={{ fontSize: 11, color: T.ok }} />
-            <Typography sx={{ fontSize: 11, color: T.textBody }}>
-              <strong style={{ color: T.ok }}>Decreasing</strong> — difference &lt; −0.5 cases
+          <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.75 }}>
+            <TrendingDownIcon sx={{ fontSize: 12, color: T.ok, mt: '1px', flexShrink: 0 }} />
+            <Typography sx={{ fontSize: 11, color: T.textBody, lineHeight: 1.5 }}>
+              <strong style={{ color: T.ok }}>Decreasing</strong>
+              {' '}— predicted cases decreased by <strong>more than 10%</strong> from the first to the last forecast month.
+              {' '}<span style={{ color: T.textFaint }}>(e.g. 100 → 89 or fewer cases)</span>
             </Typography>
           </Box>
         </Box>
       </Box>
     )}
+  </Box>
+);
+
+// ── Table Loading Skeleton ────────────────────────────────────────────────────
+const TableLoadingSkeleton = ({ barangayCount }) => (
+  <Box>
+    {/* Fake table header */}
+    <Box sx={{ px: 2, py: '10px', borderBottom: `1px solid ${T.border}`,
+      backgroundColor: T.pageBg, display: 'flex', gap: 2 }}>
+      {['Barangay', 'Year', 'Month', 'Total Forecast', 'Trend', 'Details'].map((h, i) => (
+        <Skeleton key={h} variant="text" width={i === 0 ? 100 : i === 3 ? 90 : 60}
+          height={14} sx={{ borderRadius: 1 }} />
+      ))}
+    </Box>
+    {/* Fake rows */}
+    {Array.from({ length: Math.min(barangayCount * 2, 8) }).map((_, i) => (
+      <Box key={i} sx={{
+        display: 'flex', alignItems: 'center', gap: 2,
+        px: 2, py: '11px',
+        borderBottom: `1px solid ${T.borderSoft}`,
+        backgroundColor: '#FFFFFF',
+      }}>
+        <Skeleton variant="text" width={110} height={14} sx={{ borderRadius: 1 }} />
+        <Skeleton variant="text" width={36}  height={14} sx={{ borderRadius: 1 }} />
+        <Skeleton variant="text" width={62}  height={14} sx={{ borderRadius: 1 }} />
+        <Skeleton variant="text" width={60}  height={14} sx={{ borderRadius: 1, ml: 'auto' }} />
+        <Skeleton variant="rounded" width={80} height={20} sx={{ borderRadius: '5px' }} />
+        <Skeleton variant="rounded" width={42} height={22} sx={{ borderRadius: '6px' }} />
+      </Box>
+    ))}
+    {/* Loading footer */}
+    <Box sx={{ px: 2.5, py: 2, borderTop: `1px solid ${T.borderSoft}`,
+      display: 'flex', alignItems: 'center', gap: 1.5, backgroundColor: T.pageBg }}>
+      <CircularProgress size={14} sx={{ color: T.blue }} />
+      <Typography sx={{ fontSize: 12, color: T.textMuted }}>
+        Loading forecast data for {barangayCount} barangay{barangayCount !== 1 ? 's' : ''}…
+      </Typography>
+    </Box>
   </Box>
 );
 
@@ -280,7 +358,6 @@ const DiseaseDetailPanel = ({ barangay, forecastData, city, onClose }) => {
   const histDates = forecastData?.historical_data?.dates || [];
   const histVals  = forecastData?.historical_data?.[disease] || [];
 
-  // Year selection for actual data
   const allHistYears = [...new Set(histDates.map(d => d.slice(0,4)).filter(Boolean))].sort();
   const [selectedHistYear, setSelectedHistYear] = useState(
     allHistYears.length > 0 ? allHistYears[allHistYears.length - 1] : null
@@ -300,7 +377,6 @@ const DiseaseDetailPanel = ({ barangay, forecastData, city, onClose }) => {
       .finally(() => setBLoading(false));
   }, [disease, barangay, city]);
 
-  // Filter actual data by selected year
   const filteredHistIndices = histDates.reduce((acc, d, i) => {
     if (!selectedHistYear || d.slice(0,4) === selectedHistYear) acc.push(i);
     return acc;
@@ -308,26 +384,32 @@ const DiseaseDetailPanel = ({ barangay, forecastData, city, onClose }) => {
   const filteredHistDates = filteredHistIndices.map(i => histDates[i]);
   const filteredHistVals  = filteredHistIndices.map(i => histVals[i]);
 
-  // Actual data chart
   const actualChartData = filteredHistDates.map((d, i) => ({
     month: d.slice(0,7),
     label: formatMonthLabel(d.slice(0,7)),
     actual: Math.round(filteredHistVals[i] ?? 0),
   }));
 
-  // Forecast-only chart
   const forecastChartData = dates.map((d, i) => ({
     month: d.slice(0,7),
     label: formatMonthLabel(d.slice(0,7)),
     predicted: Math.round(preds[i] ?? 0),
   }));
 
-  const trend = preds.length < 2 ? 'stable'
-    : preds[preds.length-1] - preds[0] > 0.5 ? 'increasing'
-    : preds[preds.length-1] - preds[0] < -0.5 ? 'decreasing'
-    : 'stable';
+  const firstVal = preds[0] ?? 0;
+  const lastVal  = preds[preds.length - 1] ?? 0;
+  const trend = preds.length < 2 ? 'stable' : computeTrendPct(firstVal, lastVal);
 
-  const nextMonthVal = Math.round(preds[0] ?? 0);
+  const getNextMonthValue = () => {
+    const now = new Date();
+    const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    const nextMonthKey = nextMonth.toISOString().slice(0, 7); // YYYY-MM
+    const idx = dates.findIndex(d => d.slice(0, 7) === nextMonthKey);
+    if (idx >= 0) return Math.round(preds[idx] ?? 0);
+    return Math.round(preds[0] ?? 0); // Fallback to first forecast month
+  };
+
+  const nextMonthVal = getNextMonthValue();
   const peakForecast = Math.round(Math.max(...preds, 0));
 
   return (
@@ -344,8 +426,6 @@ const DiseaseDetailPanel = ({ barangay, forecastData, city, onClose }) => {
         {/* Header */}
         <Box sx={{ px: 3, pt: 2, pb: 1.75, borderBottom: `1px solid ${T.borderSoft}`,
           backgroundColor: T.pageBg, flexShrink: 0 }}>
-
-          {/* Title row */}
           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1.5 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
               <Box sx={{ width: 32, height: 32, borderRadius: '8px',
@@ -372,10 +452,7 @@ const DiseaseDetailPanel = ({ barangay, forecastData, city, onClose }) => {
             </Box>
           </Box>
 
-          {/* ── Disease dropdown + 2 stat boxes in one aligned row ── */}
           <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 1.25, alignItems: 'stretch' }}>
-
-            {/* Disease selector */}
             <Box sx={{ p: '10px 12px', borderRadius: '10px',
               backgroundColor: '#FFFFFF', border: `1px solid ${T.border}`,
               display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: 0.75 }}>
@@ -388,8 +465,7 @@ const DiseaseDetailPanel = ({ barangay, forecastData, city, onClose }) => {
                   displayEmpty
                   sx={{
                     fontSize: 12, fontWeight: 600, color: T.textHead,
-                    backgroundColor: 'transparent',
-                    borderRadius: '7px',
+                    backgroundColor: 'transparent', borderRadius: '7px',
                     '.MuiOutlinedInput-notchedOutline': { borderColor: T.borderSoft },
                     '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: T.blue },
                     '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: T.blue },
@@ -407,7 +483,15 @@ const DiseaseDetailPanel = ({ barangay, forecastData, city, onClose }) => {
                 >
                   {allDiseases.map(d => {
                     const dInfo   = getDiseaseInfo(d);
-                    const nextVal = Math.round((forecastData?.predictions?.[d] || [])[0] ?? 0);
+                    const getNextMonthVal = () => {
+                      const now = new Date();
+                      const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+                      const nextMonthKey = nextMonth.toISOString().slice(0, 7);
+                      const idx = dates.findIndex(dt => dt.slice(0, 7) === nextMonthKey);
+                      if (idx >= 0) return Math.round((forecastData?.predictions?.[d] || [])[idx] ?? 0);
+                      return Math.round((forecastData?.predictions?.[d] || [])[0] ?? 0);
+                    };
+                    const nextVal = getNextMonthVal();
                     return (
                       <MenuItem key={d} value={d}>
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, width: '100%' }}>
@@ -425,7 +509,6 @@ const DiseaseDetailPanel = ({ barangay, forecastData, city, onClose }) => {
               </FormControl>
             </Box>
 
-            {/* Next Month Forecast */}
             <Box sx={{ p: '10px 12px', borderRadius: '10px',
               backgroundColor: '#FFFFFF', border: `1px solid ${T.border}` }}>
               <Typography sx={{ fontSize: 10.5, color: T.textMuted, fontWeight: 600,
@@ -436,7 +519,6 @@ const DiseaseDetailPanel = ({ barangay, forecastData, city, onClose }) => {
               <Typography sx={{ fontSize: 11, color: T.textFaint, mt: 0.25 }}>{dates[0] || ''}</Typography>
             </Box>
 
-            {/* Peak Forecast */}
             <Box sx={{ p: '10px 12px', borderRadius: '10px',
               backgroundColor: '#FFFFFF', border: `1px solid ${T.border}` }}>
               <Typography sx={{ fontSize: 10.5, color: T.textMuted, fontWeight: 600,
@@ -451,13 +533,9 @@ const DiseaseDetailPanel = ({ barangay, forecastData, city, onClose }) => {
 
         {/* Body */}
         <Box sx={{ overflow: 'auto', flex: 1, p: 3 }}>
-
-          {/* ── Forecast Chart FIRST ── */}
           <Box sx={{ mb: 3 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1.5 }}>
-              <Typography sx={{ fontSize: 12.5, fontWeight: 600, color: T.textHead }}>
-                Forecast
-              </Typography>
+              <Typography sx={{ fontSize: 12.5, fontWeight: 600, color: T.textHead }}>Forecast</Typography>
               <TrendTag trend={trend} />
             </Box>
             {forecastChartData.length > 0 ? (
@@ -489,12 +567,9 @@ const DiseaseDetailPanel = ({ barangay, forecastData, city, onClose }) => {
             </Box>
           </Box>
 
-          {/* ── Actual Data Chart (with year selector) ── */}
           <Box sx={{ mb: 3 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1.5 }}>
-              <Typography sx={{ fontSize: 12.5, fontWeight: 600, color: T.textHead }}>
-                Actual Data
-              </Typography>
+              <Typography sx={{ fontSize: 12.5, fontWeight: 600, color: T.textHead }}>Actual Data</Typography>
               {allHistYears.length > 0 && (
                 <FormControl size="small" sx={{ minWidth: 100 }}>
                   <Select
@@ -544,7 +619,6 @@ const DiseaseDetailPanel = ({ barangay, forecastData, city, onClose }) => {
             </Box>
           </Box>
 
-          {/* ── Age/Sex breakdown ── */}
           <Box sx={{ mb: 3 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
               <BarChartIcon sx={{ fontSize: 14, color: T.blue }} />
@@ -555,7 +629,6 @@ const DiseaseDetailPanel = ({ barangay, forecastData, city, onClose }) => {
             <AgeSexChart barangay={barangay} disease={disease} city={city} />
           </Box>
 
-          {/* ── Specific disease breakdown ── */}
           <Box>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
               <BarChartIcon sx={{ fontSize: 14, color: T.blue }} />
@@ -622,11 +695,19 @@ const DiseaseDetailPanel = ({ barangay, forecastData, city, onClose }) => {
   );
 };
 
-// ── Year Picker ───────────────────────────────────────────────────────────────
-const YearPicker = ({ availableYears, selectedYear, onSelect }) => {
+// ── Filter Date Picker ────────────────────────────────────────────────────────
+const FilterDatePicker = ({ availableYears, selectedYear, selectedMonth, onSelect }) => {
   const [popupOpen, setPopupOpen] = useState(false);
+  const [localYear,  setLocalYear]  = useState(selectedYear  || null);
+  const [localMonth, setLocalMonth] = useState(selectedMonth || null);
   const popupRef = useRef(null);
   const btnRef   = useRef(null);
+
+  const handleOpen = () => {
+    setLocalYear(selectedYear   || null);
+    setLocalMonth(selectedMonth || null);
+    setPopupOpen(true);
+  };
 
   useEffect(() => {
     const handler = (e) => {
@@ -639,71 +720,169 @@ const YearPicker = ({ availableYears, selectedYear, onSelect }) => {
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
+  const handleApply = () => {
+    onSelect({ year: localYear, month: localMonth });
+    setPopupOpen(false);
+  };
+
+  const handleClear = () => {
+    setLocalYear(null);
+    setLocalMonth(null);
+    onSelect({ year: null, month: null });
+    setPopupOpen(false);
+  };
+
+  const buttonLabel = () => {
+    if (!selectedYear && !selectedMonth) return 'Filter Date';
+    if (selectedYear && selectedMonth) {
+      return `${MONTH_NAMES[parseInt(selectedMonth, 10) - 1]} ${selectedYear}`;
+    }
+    return selectedYear || 'Filter Date';
+  };
+
+  const hasFilter = !!(selectedYear || selectedMonth);
+
   return (
     <Box>
-      <Button ref={btnRef} size="small" onClick={() => setPopupOpen(o => !o)}
-        startIcon={<CalendarMonthIcon sx={{ fontSize: 13 }} />}
-        sx={{ textTransform: 'none', fontSize: 12, fontWeight: 600,
-          color: popupOpen ? T.blue : T.textBody,
-          border: `1.5px solid ${popupOpen ? T.blue : T.border}`,
+      <Button
+        ref={btnRef}
+        size="small"
+        onClick={handleOpen}
+        startIcon={<FilterListIcon sx={{ fontSize: 13 }} />}
+        sx={{
+          textTransform: 'none', fontSize: 12, fontWeight: 600,
+          color: hasFilter ? T.blue : T.textBody,
+          border: `1.5px solid ${hasFilter ? T.blue : T.border}`,
           borderRadius: '8px', px: 1.75, py: '5px',
-          backgroundColor: popupOpen ? T.blueDim : '#FFFFFF',
-          '&:hover': { borderColor: T.blue, color: T.blue, backgroundColor: T.blueDim } }}>
-        {selectedYear || 'All Years'}
+          backgroundColor: hasFilter ? T.blueDim : '#FFFFFF',
+          '&:hover': { borderColor: T.blue, color: T.blue, backgroundColor: T.blueDim },
+        }}
+      >
+        {buttonLabel()}
       </Button>
 
       {popupOpen && ReactDOM.createPortal(
         <>
           <Box onClick={() => setPopupOpen(false)}
             sx={{ position: 'fixed', inset: 0, zIndex: 1399, backgroundColor: 'rgba(0,0,0,0.28)' }} />
-          <Box ref={el => { popupRef.current = el; }} sx={{
-            position: 'fixed', top: '50%', left: '50%',
-            transform: 'translate(-50%, -50%)',
-            zIndex: 1400, backgroundColor: '#FFFFFF',
-            border: `1px solid ${T.border}`, borderRadius: '14px',
-            boxShadow: '0 16px 48px rgba(0,0,0,0.18)', width: 340,
-            display: 'flex', flexDirection: 'column', overflow: 'hidden',
-          }}>
+          <Box
+            ref={el => { popupRef.current = el; }}
+            sx={{
+              position: 'fixed', top: '50%', left: '50%',
+              transform: 'translate(-50%, -50%)',
+              zIndex: 1400, backgroundColor: '#FFFFFF',
+              border: `1px solid ${T.border}`, borderRadius: '14px',
+              boxShadow: '0 16px 48px rgba(0,0,0,0.18)', width: 380,
+              display: 'flex', flexDirection: 'column', overflow: 'hidden',
+            }}
+          >
             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
               px: 2.5, py: 1.75, borderBottom: `1px solid ${T.borderSoft}`,
               backgroundColor: T.pageBg, flexShrink: 0 }}>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <CalendarMonthIcon sx={{ fontSize: 13, color: T.blue }} />
-                <Typography sx={{ fontSize: 13, fontWeight: 700, color: T.textHead }}>Select Year</Typography>
+                <FilterListIcon sx={{ fontSize: 13, color: T.blue }} />
+                <Typography sx={{ fontSize: 13, fontWeight: 700, color: T.textHead }}>Filter Date</Typography>
               </Box>
               <IconButton size="small" onClick={() => setPopupOpen(false)}
                 sx={{ p: 0.4, color: T.textMuted }}><CloseIcon sx={{ fontSize: 15 }} /></IconButton>
             </Box>
+
             <Box sx={{ p: 2.5 }}>
-              <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
-                <Box onClick={() => { onSelect(null); setPopupOpen(false); }}
-                  sx={{ py: '10px', px: 1, borderRadius: '8px', cursor: 'pointer',
-                    border: `1.5px solid ${!selectedYear ? T.blue : T.border}`,
-                    backgroundColor: !selectedYear ? T.blueDim : '#FFFFFF',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    '&:hover': { borderColor: T.blue, backgroundColor: T.blueDim } }}>
-                  <Typography sx={{ fontSize: 11.5, fontWeight: !selectedYear ? 600 : 400,
-                    color: !selectedYear ? T.blue : T.textBody }}>All Years</Typography>
+              <Typography sx={{ fontSize: 11, fontWeight: 600, color: T.textMuted,
+                textTransform: 'uppercase', letterSpacing: '0.5px', mb: 1 }}>
+                Year
+              </Typography>
+              <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px', mb: 2.5 }}>
+                <Box
+                  onClick={() => { setLocalYear(null); setLocalMonth(null); }}
+                  sx={{
+                    py: '8px', borderRadius: '8px', cursor: 'pointer', textAlign: 'center',
+                    border: `1.5px solid ${!localYear ? T.blue : T.border}`,
+                    backgroundColor: !localYear ? T.blueDim : '#FFFFFF',
+                    '&:hover': { borderColor: T.blue, backgroundColor: T.blueDim },
+                  }}
+                >
+                  <Typography sx={{ fontSize: 11.5, fontWeight: !localYear ? 600 : 400,
+                    color: !localYear ? T.blue : T.textBody }}>All</Typography>
                 </Box>
                 {availableYears.map(yr => (
-                  <Box key={yr} onClick={() => { onSelect(yr); setPopupOpen(false); }}
-                    sx={{ py: '10px', px: 1, borderRadius: '8px', cursor: 'pointer',
-                      border: `1.5px solid ${selectedYear === yr ? T.blue : T.border}`,
-                      backgroundColor: selectedYear === yr ? T.blueDim : '#FFFFFF',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      '&:hover': { borderColor: T.blue } }}>
-                    <Typography sx={{ fontSize: 11.5, fontWeight: selectedYear === yr ? 600 : 400,
-                      color: selectedYear === yr ? T.blue : T.textBody }}>{yr}</Typography>
+                  <Box
+                    key={yr}
+                    onClick={() => { setLocalYear(yr); setLocalMonth(null); }}
+                    sx={{
+                      py: '8px', borderRadius: '8px', cursor: 'pointer', textAlign: 'center',
+                      border: `1.5px solid ${localYear === yr ? T.blue : T.border}`,
+                      backgroundColor: localYear === yr ? T.blueDim : '#FFFFFF',
+                      '&:hover': { borderColor: T.blue },
+                    }}
+                  >
+                    <Typography sx={{ fontSize: 11.5, fontWeight: localYear === yr ? 600 : 400,
+                      color: localYear === yr ? T.blue : T.textBody }}>{yr}</Typography>
                   </Box>
                 ))}
               </Box>
+
+              <Box sx={{ opacity: localYear ? 1 : 0.4, pointerEvents: localYear ? 'auto' : 'none',
+                transition: 'opacity 0.2s' }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
+                  <Typography sx={{ fontSize: 11, fontWeight: 600, color: T.textMuted,
+                    textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                    Month <span style={{ fontSize: 10, fontWeight: 400 }}>(optional)</span>
+                  </Typography>
+                  {localMonth && (
+                    <Typography
+                      onClick={() => setLocalMonth(null)}
+                      sx={{ fontSize: 11, color: T.blue, cursor: 'pointer', '&:hover': { opacity: 0.7 } }}
+                    >
+                      Clear month
+                    </Typography>
+                  )}
+                </Box>
+                <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px' }}>
+                  {MONTH_SHORT.map((mn, idx) => {
+                    const val = String(idx + 1).padStart(2, '0');
+                    const isSelected = localMonth === val;
+                    return (
+                      <Box
+                        key={val}
+                        onClick={() => setLocalMonth(isSelected ? null : val)}
+                        sx={{
+                          py: '7px', borderRadius: '7px', cursor: 'pointer', textAlign: 'center',
+                          border: `1.5px solid ${isSelected ? T.blue : T.border}`,
+                          backgroundColor: isSelected ? T.blueDim : '#FFFFFF',
+                          '&:hover': { borderColor: T.blue, backgroundColor: T.blueDim },
+                        }}
+                      >
+                        <Typography sx={{ fontSize: 11.5, fontWeight: isSelected ? 600 : 400,
+                          color: isSelected ? T.blue : T.textBody }}>{mn}</Typography>
+                      </Box>
+                    );
+                  })}
+                </Box>
+              </Box>
+
+              {(localYear || localMonth) && (
+                <Box sx={{ mt: 2, px: 1.5, py: 1, borderRadius: '7px',
+                  backgroundColor: T.blueDim, border: `1px solid rgba(37,99,235,0.2)` }}>
+                  <Typography sx={{ fontSize: 11.5, color: T.blue, fontWeight: 500 }}>
+                    Showing: {localMonth ? `${MONTH_NAMES[parseInt(localMonth, 10) - 1]} ` : 'All months of '}{localYear}
+                  </Typography>
+                </Box>
+              )}
             </Box>
+
             <Box sx={{ px: 2.5, py: 1.75, borderTop: `1px solid ${T.borderSoft}`,
-              display: 'flex', justifyContent: 'flex-end', backgroundColor: T.pageBg }}>
-              <Button size="small" onClick={() => setPopupOpen(false)}
+              display: 'flex', justifyContent: 'space-between', gap: 1, backgroundColor: T.pageBg }}>
+              <Button size="small" onClick={handleClear}
                 sx={{ textTransform: 'none', fontSize: 12, color: T.textMuted,
                   border: `1px solid ${T.border}`, borderRadius: '7px', px: 1.75, py: 0.5 }}>
-                Close
+                Clear All
+              </Button>
+              <Button size="small" onClick={handleApply}
+                sx={{ textTransform: 'none', fontSize: 12, fontWeight: 600,
+                  backgroundColor: T.blue, color: '#fff', borderRadius: '7px', px: 2, py: 0.5,
+                  '&:hover': { backgroundColor: T.blueMid } }}>
+                Apply
               </Button>
             </Box>
           </Box>
@@ -714,8 +893,18 @@ const YearPicker = ({ availableYears, selectedYear, onSelect }) => {
 };
 
 // ── Export ────────────────────────────────────────────────────────────────────
-const exportTableData = (format, forecastHistory, selectedBarangays, availableDiseases, cityLabel) => {
+const computeTrend = (diseaseEntries) => {
+  if (!diseaseEntries || diseaseEntries.length < 2) return 'Stable';
+  const sorted = [...diseaseEntries].sort((a, b) => a.period.localeCompare(b.period));
+  const first  = sorted[0].predictedValue ?? 0;
+  const last   = sorted[sorted.length - 1].predictedValue ?? 0;
+  const t = computeTrendPct(first, last);
+  return t === 'increasing' ? 'Increasing' : t === 'decreasing' ? 'Decreasing' : 'Stable';
+};
+
+const exportTableData = async (format, forecastHistory, selectedBarangays, availableDiseases, cityLabel) => {
   if (!forecastHistory?.length || selectedBarangays.size === 0) return;
+
   const diseases = availableDiseases.length > 0
     ? availableDiseases
     : [...new Set(forecastHistory.map(h => h.disease))];
@@ -728,87 +917,189 @@ const exportTableData = (format, forecastHistory, selectedBarangays, availableDi
     lookup[h.barangay][h.period][h.disease] = h;
   });
 
-  const rows = [];
+  const city = localStorage.getItem('datasetCity') || '';
+  const breakdownCache = {};
+  const breakdownKeys = [];
   [...selectedBarangays].forEach(barangay => {
-    Object.keys(lookup[barangay] || {}).sort().forEach(period => {
-      const diseaseMap = lookup[barangay][period] || {};
-      const vals  = diseases.map(d => diseaseMap[d]?.predictedValue ?? 0);
-      const total = vals.reduce((s, v) => s + v, 0);
-      rows.push({ barangay, period, vals, total });
+    diseases.forEach(d => {
+      const key = `${barangay}::${d.replace('_cases', '')}`;
+      if (!breakdownCache[key]) breakdownKeys.push({ barangay, catKey: d.replace('_cases', ''), key });
     });
   });
 
+  await Promise.allSettled(
+    breakdownKeys.map(({ barangay, catKey, key }) =>
+      getDiseaseBreakdown(catKey, barangay, city, 1)
+        .then(data => {
+          breakdownCache[key] = data?.breakdown?.[0]?.label
+            ?.replace(/^[A-Z0-9]+\.?[0-9]*;\s*/, '') || '—';
+        })
+        .catch(() => { breakdownCache[key] = '—'; })
+    )
+  );
+
+  const rows = [];
+  [...selectedBarangays].forEach(barangay => {
+    const diseaseTrendMap = {};
+    diseases.forEach(d => {
+      const entries = forecastHistory.filter(h => h.barangay === barangay && h.disease === d);
+      diseaseTrendMap[d] = computeTrend(entries);
+    });
+
+    Object.keys(lookup[barangay] || {}).sort().forEach(period => {
+      const diseaseMap = lookup[barangay][period] || {};
+      diseases.forEach(d => {
+        const entry      = diseaseMap[d];
+        const predicted  = Math.round(entry?.predictedValue ?? 0);
+        const trend      = diseaseTrendMap[d] || 'Stable';
+        const catKey     = d.replace('_cases', '');
+        const topDisease = breakdownCache[`${barangay}::${catKey}`] || '—';
+        const dInfo      = getDiseaseInfo(d);
+        rows.push({
+          barangay, year: getPeriodYear(period) || '',
+          month: formatMonthLabel(period),
+          category: dInfo.label, predicted, trend, topDisease,
+        });
+      });
+    });
+  });
+
+  if (rows.length === 0) return;
+  const timestamp = new Date().toISOString().slice(0, 10);
+
   if (format === 'csv') {
-    const headers  = ['Barangay','Year','Month',...diseases.map(d => getDiseaseInfo(d).label),'Total'];
-    const csvRows  = [headers.join(','), ...rows.map(r => [
-      r.barangay, getPeriodYear(r.period), formatMonthLabel(r.period),
-      ...r.vals.map(v => Math.round(v)), Math.round(r.total)
-    ].join(','))];
-    const blob = new Blob([csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const headers = ['Barangay','Year','Month','Disease Category','Predicted Cases','Trend','Top Specific Disease (Analysis)'];
+    const csvRows = [
+      headers.join(','),
+      ...rows.map(r => [
+        `"${r.barangay}"`, r.year, r.month,
+        `"${r.category}"`, r.predicted, r.trend, `"${r.topDisease}"`,
+      ].join(',')),
+    ];
+    const blob = new Blob(['\uFEFF' + csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement('a');
-    a.href = url; a.download = `forecast_${new Date().toISOString().slice(0,10)}.csv`; a.click();
+    a.href = url; a.download = `forecast_${timestamp}.csv`; a.click();
     URL.revokeObjectURL(url);
   } else {
-    const lines = ['PREDICTHEALTH — BARANGAY FORECAST TABLE', '='.repeat(60)];
-    if (cityLabel) lines.push(`City: ${cityLabel}`);
-    lines.push(`Generated: ${new Date().toLocaleDateString('en-PH', { dateStyle: 'long' })}`, '');
+    const lines = [
+      'PREDICTHEALTH — BARANGAY FORECAST REPORT',
+      '='.repeat(66),
+    ];
+    if (cityLabel) lines.push(`City     : ${cityLabel}`);
+    lines.push(`Generated: ${new Date().toLocaleDateString('en-PH', { dateStyle: 'long' })}`);
+    lines.push(`Barangays: ${[...selectedBarangays].join(', ')}`);
+    lines.push('');
+
+    const grouped = {};
     rows.forEach(r => {
-      lines.push(`${r.barangay} | ${getPeriodYear(r.period)} ${formatMonthLabel(r.period)}`);
-      diseases.forEach((d, i) => lines.push(`  ${getDiseaseInfo(d).label}: ${Math.round(r.vals[i])}`));
-      lines.push(`  Total: ${Math.round(r.total)}`, '');
+      if (!grouped[r.barangay]) grouped[r.barangay] = {};
+      const key = `${r.year}-${r.month}`;
+      if (!grouped[r.barangay][key]) grouped[r.barangay][key] = [];
+      grouped[r.barangay][key].push(r);
     });
+
+    Object.entries(grouped).forEach(([barangay, periods]) => {
+      lines.push('─'.repeat(66));
+      lines.push(`BARANGAY: ${barangay.toUpperCase()}`);
+      lines.push('');
+      Object.entries(periods).forEach(([, diseaseRows]) => {
+        const { year, month } = diseaseRows[0];
+        const total = Math.round(diseaseRows.reduce((s, r) => s + r.predicted, 0));
+        lines.push(`  📅 ${month} ${year}   (Total Forecast: ${total.toLocaleString()} cases)`);
+        lines.push(`  ${'Disease Category'.padEnd(24)} ${'Predicted'.padStart(9)}   ${'Trend'.padEnd(12)}  Top Specific Disease`);
+        lines.push(`  ${'-'.repeat(80)}`);
+        diseaseRows.forEach(r => {
+          const trendIcon = r.trend === 'Increasing' ? '↑' : r.trend === 'Decreasing' ? '↓' : '—';
+          lines.push(`  ${r.category.padEnd(24)} ${String(r.predicted).padStart(9)}   ${`${trendIcon} ${r.trend}`.padEnd(12)}  ${r.topDisease}`);
+        });
+        lines.push('');
+      });
+    });
+
+    lines.push('='.repeat(66));
+    lines.push('End of Report — PredictHealth');
+
     const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8;' });
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement('a');
-    a.href = url; a.download = `forecast_${new Date().toISOString().slice(0,10)}.txt`; a.click();
+    a.href = url; a.download = `forecast_${timestamp}.txt`; a.click();
     URL.revokeObjectURL(url);
   }
 };
 
 const ExportMenu = ({ forecastHistory, confirmedBarangays, availableDiseases, cityLabel }) => {
-  const [open, setOpen] = useState(false);
+  const [open,      setOpen]      = useState(false);
+  const [exporting, setExporting] = useState(false);
   const ref = useRef(null);
+
   useEffect(() => {
     const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, []);
+
   const disabled = confirmedBarangays.size === 0 || forecastHistory.length === 0;
+
+  const handleExport = async (format) => {
+    setOpen(false);
+    setExporting(true);
+    try {
+      await exportTableData(format, forecastHistory, confirmedBarangays, availableDiseases, cityLabel);
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <Box ref={ref} sx={{ position: 'relative', flexShrink: 0 }}>
-      <Tooltip title={disabled ? 'Confirm a barangay first' : 'Export table data'} placement="top">
+      <Tooltip title={disabled ? 'Confirm a barangay first' : 'Export forecast data'} placement="top">
         <span>
-          <Button onClick={() => !disabled && setOpen(o => !o)} disabled={disabled}
-            startIcon={<FileDownloadIcon sx={{ fontSize: 14 }} />}
-            endIcon={<ArrowDownIcon sx={{ fontSize: 13, transition: 'transform 0.2s',
+          <Button
+            onClick={() => !disabled && !exporting && setOpen(o => !o)}
+            disabled={disabled || exporting}
+            startIcon={exporting
+              ? <CircularProgress size={13} color="inherit" />
+              : <FileDownloadIcon sx={{ fontSize: 14 }} />}
+            endIcon={!exporting && <ArrowDownIcon sx={{ fontSize: 13, transition: 'transform 0.2s',
               transform: open ? 'rotate(180deg)' : 'none' }} />}
             sx={{ textTransform: 'none', fontSize: 12, fontWeight: 500, color: T.textMuted,
               backgroundColor: '#FFFFFF', border: `1px solid ${T.border}`, borderRadius: '8px',
               px: 1.5, py: '6px', '&:hover': { backgroundColor: T.borderSoft, borderColor: T.blue },
-              '&:disabled': { opacity: 0.4 } }}>
-            Export
+              '&:disabled': { opacity: 0.5 } }}>
+            {exporting ? 'Exporting…' : 'Export'}
           </Button>
         </span>
       </Tooltip>
       {open && (
         <Box sx={{ position: 'fixed', zIndex: 1400, backgroundColor: '#FFFFFF',
           border: `1px solid ${T.border}`, borderRadius: '10px',
-          boxShadow: '0 8px 24px rgba(0,0,0,0.12)', minWidth: 170, overflow: 'hidden' }}
+          boxShadow: '0 8px 24px rgba(0,0,0,0.12)', minWidth: 190, overflow: 'hidden' }}
           ref={el => {
             if (el && ref.current) {
               const btn = ref.current.getBoundingClientRect();
-              el.style.top  = (btn.bottom + 6) + 'px';
+              el.style.top   = (btn.bottom + 6) + 'px';
               el.style.right = (window.innerWidth - btn.right) + 'px';
             }
           }}>
-          {[{ format: 'csv', label: 'Export as CSV' }, { format: 'txt', label: 'Export as TXT' }].map(opt => (
-            <Box key={opt.format}
-              onClick={() => { exportTableData(opt.format, forecastHistory, confirmedBarangays, availableDiseases, cityLabel); setOpen(false); }}
-              sx={{ display: 'flex', alignItems: 'center', gap: 1.25, px: 2, py: 1.125,
+          <Box sx={{ px: 2, py: 1, borderBottom: `1px solid ${T.borderSoft}`, backgroundColor: T.pageBg }}>
+            <Typography sx={{ fontSize: 11, fontWeight: 600, color: T.textMuted,
+              textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+              {confirmedBarangays.size} barangay{confirmedBarangays.size > 1 ? 's' : ''} selected
+            </Typography>
+          </Box>
+          {[
+            { format: 'csv', label: 'Export as CSV', sub: 'Spreadsheet format' },
+            { format: 'txt', label: 'Export as TXT', sub: 'Formatted report' },
+          ].map(opt => (
+            <Box key={opt.format} onClick={() => handleExport(opt.format)}
+              sx={{ display: 'flex', alignItems: 'center', gap: 1.25, px: 2, py: 1.25,
                 cursor: 'pointer', '&:hover': { backgroundColor: T.borderSoft } }}>
-              <FileIcon sx={{ fontSize: 14, color: T.textMuted }} />
-              <Typography sx={{ fontSize: 12.5, color: T.textBody }}>{opt.label}</Typography>
+              <FileIcon sx={{ fontSize: 14, color: T.textMuted, flexShrink: 0 }} />
+              <Box>
+                <Typography sx={{ fontSize: 12.5, color: T.textBody, fontWeight: 500 }}>{opt.label}</Typography>
+                <Typography sx={{ fontSize: 10.5, color: T.textFaint }}>{opt.sub}</Typography>
+              </Box>
             </Box>
           ))}
         </Box>
@@ -882,8 +1173,7 @@ const BarangayPicker = ({ availableBarangays, generatedBarangays, pending, onPen
             zIndex: 1400, backgroundColor: '#FFFFFF',
             border: `1px solid ${T.border}`, borderRadius: '14px',
             boxShadow: '0 16px 48px rgba(0,0,0,0.18)',
-            width: '90vw', maxWidth: 760,
-            maxHeight: '80vh',
+            width: '90vw', maxWidth: 760, maxHeight: '80vh',
             display: 'flex', flexDirection: 'column', overflow: 'hidden',
           }}>
             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -970,17 +1260,20 @@ const BarangayPicker = ({ availableBarangays, generatedBarangays, pending, onPen
   );
 };
 
-// ── Forecast Table ────────────────────────────────────────────────────────────
-// Simplified: Barangay | Year | Month | Total Forecast | Details
+// ── Forecast Table with Pagination ────────────────────────────────────────────
 const ForecastTable = ({ forecastHistory, confirmedBarangays, availableDiseases,
-                         selectedYear, onRowClick }) => {
+                         selectedYear, selectedMonth, onRowClick }) => {
+  const [page, setPage] = useState(1);
+
   const diseases = availableDiseases.length > 0
     ? availableDiseases
     : [...new Set(forecastHistory.map(h => h.disease))];
 
-  const filteredHistory = selectedYear
-    ? forecastHistory.filter(h => getPeriodYear(h.period) === selectedYear)
-    : forecastHistory;
+  const filteredHistory = forecastHistory.filter(h => {
+    if (selectedYear  && getPeriodYear(h.period)  !== selectedYear)  return false;
+    if (selectedMonth && getPeriodMonth(h.period) !== selectedMonth) return false;
+    return true;
+  });
 
   const lookup = {};
   filteredHistory.forEach(h => {
@@ -989,6 +1282,29 @@ const ForecastTable = ({ forecastHistory, confirmedBarangays, availableDiseases,
     if (!lookup[h.barangay][h.period]) lookup[h.barangay][h.period] = {};
     lookup[h.barangay][h.period][h.disease] = h;
   });
+
+  const allRows = [];
+  [...confirmedBarangays].forEach(barangay => {
+    Object.keys(lookup[barangay] || {}).sort().forEach(period => {
+      const diseaseMap = lookup[barangay][period] || {};
+      const total = Math.round(diseases.reduce((s, d) => s + (diseaseMap[d]?.predictedValue ?? 0), 0));
+
+      const trendCount = { increasing: 0, decreasing: 0, stable: 0 };
+      diseases.forEach(d => {
+        const entries = forecastHistory.filter(h => h.barangay === barangay && h.disease === d);
+        const t = getTrendFromEntries(entries);
+        trendCount[t]++;
+      });
+      const rowTrend = Object.entries(trendCount).sort((a,b) => b[1]-a[1])[0]?.[0] || 'stable';
+
+      allRows.push({ barangay, period, total, rowTrend });
+    });
+  });
+
+  useEffect(() => { setPage(1); }, [selectedYear, selectedMonth, confirmedBarangays]);
+
+  const totalPages = Math.max(1, Math.ceil(allRows.length / ROWS_PER_PAGE));
+  const pageRows   = allRows.slice((page - 1) * ROWS_PER_PAGE, page * ROWS_PER_PAGE);
 
   const thSx = {
     fontSize: 11, fontWeight: 600, color: T.textMuted, textTransform: 'uppercase',
@@ -1000,95 +1316,148 @@ const ForecastTable = ({ forecastHistory, confirmedBarangays, availableDiseases,
     borderBottom: `1px solid ${T.borderSoft}`, verticalAlign: 'middle',
   };
 
-  const rows = [];
-  [...confirmedBarangays].forEach(barangay => {
-    Object.keys(lookup[barangay] || {}).sort().forEach(period => {
-      const diseaseMap = lookup[barangay][period] || {};
-      const vals  = diseases.map(d => Math.round(diseaseMap[d]?.predictedValue ?? 0));
-      const total = vals.reduce((s, v) => s + v, 0);
-
-      // Majority-vote trend
-      const trendCount = { increasing: 0, decreasing: 0, stable: 0 };
-      diseases.forEach(d => { const t = diseaseMap[d]?.trend || 'stable'; trendCount[t]++; });
-      const rowTrend = Object.entries(trendCount).sort((a,b) => b[1]-a[1])[0]?.[0] || 'stable';
-
-      rows.push({ barangay, period, total, rowTrend });
-    });
-  });
-
-  if (rows.length === 0) return (
+  if (allRows.length === 0) return (
     <Box sx={{ py: 5, textAlign: 'center' }}>
       <Typography sx={{ fontSize: 12.5, color: T.textMuted }}>
-        No forecast data found for the selected barangay(s).
+        No forecast data found for the selected filter.
       </Typography>
     </Box>
   );
 
   return (
-    <Box sx={{ overflowX: 'auto' }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-        <thead>
-          <tr>
-            <th style={thSx}>Barangay</th>
-            <th style={thSx}>Year</th>
-            <th style={thSx}>Month</th>
-            <th style={{ ...thSx, textAlign: 'right' }}>Total Forecast</th>
-            <th style={{ ...thSx, textAlign: 'center' }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, justifyContent: 'center' }}>
-                Trend
-                <Tooltip title={
-                  <Box sx={{ p: 0.5 }}>
-                    <Typography sx={{ fontSize: 11, fontWeight: 600, mb: 0.5, color: '#fff' }}>How trend is determined:</Typography>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 0.25 }}>
-                      <TrendingUpIcon sx={{ fontSize: 11 }} />
-                      <Typography sx={{ fontSize: 11 }}>Increasing — last vs first &gt; +0.5</Typography>
+    <Box>
+      <Box sx={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr>
+              <th style={thSx}>Barangay</th>
+              <th style={thSx}>Year</th>
+              <th style={thSx}>Month</th>
+              <th style={{ ...thSx, textAlign: 'right' }}>Total Forecast</th>
+              <th style={{ ...thSx, textAlign: 'center' }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, justifyContent: 'center' }}>
+                  Trend
+                  <Tooltip title={
+                    <Box sx={{ p: 0.5 }}>
+                      <Typography sx={{ fontSize: 11, fontWeight: 600, mb: 0.5 }}>
+                        Trend is based on % change (first → last forecast month):
+                      </Typography>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 0.25 }}>
+                        <TrendingUpIcon sx={{ fontSize: 11 }} />
+                        <Typography sx={{ fontSize: 11 }}>Increasing — cases rose more than 10%</Typography>
+                      </Box>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 0.25 }}>
+                        <RemoveIcon sx={{ fontSize: 11 }} />
+                        <Typography sx={{ fontSize: 11 }}>Stable — change within ±10%</Typography>
+                      </Box>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                        <TrendingDownIcon sx={{ fontSize: 11 }} />
+                        <Typography sx={{ fontSize: 11 }}>Decreasing — cases dropped more than 10%</Typography>
+                      </Box>
                     </Box>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 0.25 }}>
-                      <RemoveIcon sx={{ fontSize: 11 }} />
-                      <Typography sx={{ fontSize: 11 }}>Stable — between −0.5 and +0.5</Typography>
-                    </Box>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
-                      <TrendingDownIcon sx={{ fontSize: 11 }} />
-                      <Typography sx={{ fontSize: 11 }}>Decreasing — last vs first &lt; −0.5</Typography>
-                    </Box>
-                  </Box>
-                } placement="top" arrow>
-                  <InfoIcon sx={{ fontSize: 12, color: T.textFaint, cursor: 'help' }} />
-                </Tooltip>
-              </Box>
-            </th>
-            <th style={{ ...thSx, textAlign: 'center' }}>Details</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map(({ barangay, period, total, rowTrend }) => (
-            <tr key={`${barangay}-${period}`} style={{ backgroundColor: '#FFFFFF' }}>
-              <td style={{ ...tdSx, fontWeight: 600, color: T.textHead }}>{barangay}</td>
-              <td style={{ ...tdSx, color: T.textMuted, fontWeight: 500 }}>{getPeriodYear(period)}</td>
-              <td style={tdSx}>{formatMonthLabel(period)}</td>
-              <td style={{ ...tdSx, textAlign: 'right', fontWeight: 700, color: T.textHead }}>
-                {total.toLocaleString()}
-              </td>
-              <td style={{ ...tdSx, textAlign: 'center' }}>
-                <TrendTag trend={rowTrend} />
-              </td>
-              <td style={{ ...tdSx, textAlign: 'center' }}>
-                <Button size="small" onClick={() => onRowClick(barangay, period)}
-                  sx={{ textTransform: 'none', fontSize: 11, fontWeight: 600,
-                    color: T.blue, backgroundColor: T.blueDim,
-                    border: '1px solid rgba(37,99,235,0.2)', borderRadius: '6px',
-                    px: 1.25, py: 0.25, minWidth: 'auto',
-                    '&:hover': { backgroundColor: 'rgba(37,99,235,0.12)' } }}>
-                  View
-                </Button>
-              </td>
+                  } placement="top" arrow>
+                    <InfoIcon sx={{ fontSize: 12, color: T.textFaint, cursor: 'help' }} />
+                  </Tooltip>
+                </Box>
+              </th>
+              <th style={{ ...thSx, textAlign: 'center' }}>Details</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {pageRows.map(({ barangay, period, total, rowTrend }) => (
+              <tr key={`${barangay}-${period}`} style={{ backgroundColor: '#FFFFFF' }}>
+                <td style={{ ...tdSx, fontWeight: 600, color: T.textHead }}>{barangay}</td>
+                <td style={{ ...tdSx, color: T.textMuted, fontWeight: 500 }}>{getPeriodYear(period)}</td>
+                <td style={tdSx}>{formatMonthLabel(period)}</td>
+                <td style={{ ...tdSx, textAlign: 'right', fontWeight: 700, color: T.textHead }}>
+                  {total.toLocaleString()}
+                </td>
+                <td style={{ ...tdSx, textAlign: 'center' }}>
+                  <TrendTag trend={rowTrend} />
+                </td>
+                <td style={{ ...tdSx, textAlign: 'center' }}>
+                  <Button size="small" onClick={() => onRowClick(barangay, period)}
+                    sx={{ textTransform: 'none', fontSize: 11, fontWeight: 600,
+                      color: T.blue, backgroundColor: T.blueDim,
+                      border: '1px solid rgba(37,99,235,0.2)', borderRadius: '6px',
+                      px: 1.25, py: 0.25, minWidth: 'auto',
+                      '&:hover': { backgroundColor: 'rgba(37,99,235,0.12)' } }}>
+                    View
+                  </Button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Box>
 
-      {/* Trend legend with thresholds below table */}
-      <Box sx={{ px: 2.5, py: 2, borderTop: `1px solid ${T.borderSoft}`, backgroundColor: T.pageBg }}>
+      {/* Pagination */}
+      <Box sx={{ px: 2.5, py: 1.75, borderTop: `1px solid ${T.borderSoft}`,
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        backgroundColor: T.pageBg, flexWrap: 'wrap', gap: 1 }}>
+        <Typography sx={{ fontSize: 12, color: T.textMuted }}>
+          Showing{' '}
+          <strong style={{ color: T.textBody }}>{(page - 1) * ROWS_PER_PAGE + 1}–{Math.min(page * ROWS_PER_PAGE, allRows.length)}</strong>
+          {' '}of{' '}
+          <strong style={{ color: T.textBody }}>{allRows.length}</strong>
+          {' '}entries
+        </Typography>
+
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+          <IconButton
+            size="small"
+            disabled={page === 1}
+            onClick={() => setPage(p => p - 1)}
+            sx={{ p: 0.5, border: `1px solid ${T.border}`, borderRadius: '7px',
+              backgroundColor: '#FFFFFF', color: page === 1 ? T.textFaint : T.textBody,
+              '&:hover': { borderColor: T.blue, color: T.blue } }}
+          >
+            <ChevronLeftIcon sx={{ fontSize: 16 }} />
+          </IconButton>
+
+          {Array.from({ length: totalPages }, (_, i) => i + 1)
+            .filter(p => p === 1 || p === totalPages || Math.abs(p - page) <= 1)
+            .reduce((acc, p, idx, arr) => {
+              if (idx > 0 && p - arr[idx - 1] > 1) acc.push('...');
+              acc.push(p);
+              return acc;
+            }, [])
+            .map((p, idx) =>
+              p === '...' ? (
+                <Typography key={`ellipsis-${idx}`} sx={{ fontSize: 12, color: T.textFaint, px: 0.5 }}>…</Typography>
+              ) : (
+                <Box
+                  key={p}
+                  onClick={() => setPage(p)}
+                  sx={{
+                    width: 30, height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    borderRadius: '7px', cursor: 'pointer',
+                    border: `1px solid ${page === p ? T.blue : T.border}`,
+                    backgroundColor: page === p ? T.blue : '#FFFFFF',
+                    '&:hover': { borderColor: T.blue, backgroundColor: page === p ? T.blue : T.blueDim },
+                  }}
+                >
+                  <Typography sx={{ fontSize: 12, fontWeight: page === p ? 700 : 400,
+                    color: page === p ? '#fff' : T.textBody }}>{p}</Typography>
+                </Box>
+              )
+            )
+          }
+
+          <IconButton
+            size="small"
+            disabled={page === totalPages}
+            onClick={() => setPage(p => p + 1)}
+            sx={{ p: 0.5, border: `1px solid ${T.border}`, borderRadius: '7px',
+              backgroundColor: '#FFFFFF', color: page === totalPages ? T.textFaint : T.textBody,
+              '&:hover': { borderColor: T.blue, color: T.blue } }}
+          >
+            <ChevronRightIcon sx={{ fontSize: 16 }} />
+          </IconButton>
+        </Box>
+      </Box>
+
+      <Box sx={{ px: 2.5, py: 2, borderTop: `1px solid ${T.borderSoft}`, backgroundColor: '#FAFBFC' }}>
         <TrendLegend showThresholds={true} />
       </Box>
     </Box>
@@ -1096,8 +1465,9 @@ const ForecastTable = ({ forecastHistory, confirmedBarangays, availableDiseases,
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-const LS_CONFIRMED = 'predictionConfirmedBarangays';
-const LS_SEL_YEAR  = 'predictionSelectedYear';
+const LS_CONFIRMED  = 'predictionConfirmedBarangays';
+const LS_SEL_YEAR   = 'predictionSelectedYear';
+const LS_SEL_MONTH  = 'predictionSelectedMonth';
 
 const saveConfirmed = (set) => {
   try { localStorage.setItem(LS_CONFIRMED, JSON.stringify([...set])); } catch {}
@@ -1109,26 +1479,28 @@ const loadConfirmed = () => {
   } catch { return new Set(); }
 };
 
-// Build forecastHistory entries from a getSavedForecast result
 const buildHistoryEntries = (result, brgy, cityLabel) => {
   const diseases = result.disease_columns || Object.keys(result.predictions || {});
   return diseases.flatMap(disease => {
     const preds = result.predictions[disease] || [];
+    const firstVal = preds[0] ?? 0;
+    const lastVal  = preds[preds.length - 1] ?? 0;
+    const trend = preds.length >= 2 ? computeTrendPct(firstVal, lastVal) : 'stable';
     return result.forecast_dates.map((fd, i) => ({
       id: Date.now() + Math.random(),
       disease,
       label: getDiseaseInfo(disease).label,
       period: fd.slice(0, 7),
       predictedValue: Math.round(preds[i] ?? 0),
-      trend: preds.length >= 2
-        ? (preds[preds.length-1]-preds[0] > 0.5 ? 'increasing'
-          : preds[preds.length-1]-preds[0] < -0.5 ? 'decreasing' : 'stable')
-        : 'stable',
+      trend,
       barangay: brgy,
       city: result.city || cityLabel,
     }));
   });
 };
+
+const getCurrentYear  = () => String(new Date().getFullYear());
+const getCurrentMonth = () => String(new Date().getMonth() + 1).padStart(2, '0');
 
 // ── Main Prediction Page ──────────────────────────────────────────────────────
 const Prediction = ({ onNavigate, onLogout }) => {
@@ -1140,14 +1512,18 @@ const Prediction = ({ onNavigate, onLogout }) => {
   const [availableDiseases,  setAvailableDiseases]  = useState([]);
   const [forecastHistory,    setForecastHistory]    = useState([]);
   const [pendingBarangays,   setPendingBarangays]   = useState(new Set());
-
-  // ── Restore confirmed barangays + year from localStorage on mount ──
   const [confirmedBarangays, setConfirmedBarangays] = useState(() => loadConfirmed());
-  const [selectedYear,       setSelectedYear]       = useState(() => {
-    try { return localStorage.getItem(LS_SEL_YEAR) || null; } catch { return null; }
+
+  const [selectedYear,  setSelectedYear]  = useState(() => {
+    try { return localStorage.getItem(LS_SEL_YEAR)  || null; } catch { return null; }
   });
+  const [selectedMonth, setSelectedMonth] = useState(() => {
+    try { return localStorage.getItem(LS_SEL_MONTH) || null; } catch { return null; }
+  });
+
   const [loadingBarangay,    setLoadingBarangay]    = useState(null);
-  const [restoringSelection, setRestoringSelection] = useState(false);
+  // isInitializing: true while we are restoring saved confirmed barangays on mount
+  const [isInitializing,     setIsInitializing]     = useState(() => loadConfirmed().size > 0);
 
   const [detailPanel,    setDetailPanel]    = useState(null);
   const [detailForecast, setDetailForecast] = useState(null);
@@ -1155,22 +1531,22 @@ const Prediction = ({ onNavigate, onLogout }) => {
 
   const cityLabel = localStorage.getItem('datasetCity') || '';
 
-  // ── Persist selectedYear whenever it changes ──
   useEffect(() => {
     try {
-      if (selectedYear) localStorage.setItem(LS_SEL_YEAR, selectedYear);
-      else localStorage.removeItem(LS_SEL_YEAR);
+      if (selectedYear)  localStorage.setItem(LS_SEL_YEAR,  selectedYear);
+      else               localStorage.removeItem(LS_SEL_YEAR);
+      if (selectedMonth) localStorage.setItem(LS_SEL_MONTH, selectedMonth);
+      else               localStorage.removeItem(LS_SEL_MONTH);
     } catch {}
-  }, [selectedYear]);
+  }, [selectedYear, selectedMonth]);
 
-  // ── On mount: load base data + restore confirmed barangay history ──
+  // On mount: load base data + restore confirmed barangay history
   useEffect(() => {
-    const dis  = localStorage.getItem('diseaseColumns');
+    const dis = localStorage.getItem('diseaseColumns');
     if (dis)  setAvailableDiseases(JSON.parse(dis));
-    const bar  = localStorage.getItem('availableBarangays');
+    const bar = localStorage.getItem('availableBarangays');
     if (bar)  setAvailableBarangays(JSON.parse(bar));
 
-    // Load existing history from localStorage first
     let existingHistory = [];
     try {
       const hist = localStorage.getItem('forecastHistory');
@@ -1180,17 +1556,21 @@ const Prediction = ({ onNavigate, onLogout }) => {
       }
     } catch {}
 
-    // Restore data for confirmed barangays not yet in forecastHistory
     const confirmed = loadConfirmed();
-    if (confirmed.size === 0) return;
+    if (confirmed.size === 0) {
+      setIsInitializing(false);
+      return;
+    }
 
     const existingBarangays = new Set(existingHistory.map(h => h.barangay).filter(Boolean));
     const needsRestore = [...confirmed].filter(b => !existingBarangays.has(b));
 
-    if (needsRestore.length === 0) return;
+    // If history already covers all confirmed barangays, no fetch needed
+    if (needsRestore.length === 0) {
+      setIsInitializing(false);
+      return;
+    }
 
-    // Fetch missing barangays in background
-    setRestoringSelection(true);
     const city = localStorage.getItem('datasetCity') || '';
 
     Promise.allSettled(
@@ -1206,18 +1586,16 @@ const Prediction = ({ onNavigate, onLogout }) => {
       });
       if (newEntries.length > 0) {
         setForecastHistory(prev => {
-          // Don't duplicate — remove any existing entries for these barangays then add fresh
-          const fetched = new Set(needsRestore);
+          const fetched  = new Set(needsRestore);
           const filtered = prev.filter(h => !fetched.has(h.barangay));
           const updated  = [...filtered, ...newEntries];
           try { localStorage.setItem('forecastHistory', JSON.stringify(updated)); } catch {}
           return updated;
         });
       }
-    }).finally(() => setRestoringSelection(false));
-  }, []); // run once on mount
+    }).finally(() => setIsInitializing(false));
+  }, []);
 
-  // ── Persist confirmedBarangays whenever it changes ──
   useEffect(() => {
     saveConfirmed(confirmedBarangays);
   }, [confirmedBarangays]);
@@ -1233,6 +1611,11 @@ const Prediction = ({ onNavigate, onLogout }) => {
   const availableYears = [...new Set(
     forecastHistory.map(h => getPeriodYear(h.period)).filter(Boolean)
   )].sort();
+
+  const handleFilterDateSelect = useCallback(({ year, month }) => {
+    setSelectedYear(year);
+    setSelectedMonth(month);
+  }, []);
 
   const handleRowClick = useCallback(async (barangay, period) => {
     setDetailPanel({ barangay, period });
@@ -1257,7 +1640,11 @@ const Prediction = ({ onNavigate, onLogout }) => {
 
   const handleConfirmBarangays = useCallback(async (selected) => {
     setConfirmedBarangays(new Set(selected));
-    // saveConfirmed is handled by the useEffect above
+
+    const curYear  = getCurrentYear();
+    const curMonth = getCurrentMonth();
+    setSelectedYear(curYear);
+    setSelectedMonth(curMonth);
 
     const existingBarangays = new Set(forecastHistory.map(h => h.barangay).filter(Boolean));
     const missing = [...selected].filter(b => !existingBarangays.has(b));
@@ -1282,6 +1669,16 @@ const Prediction = ({ onNavigate, onLogout }) => {
     }
   }, [forecastHistory, cityLabel]);
 
+  // ── Derive the content state ──────────────────────────────────────────────
+  // isInitializing   → show skeleton table (data is loading from API)
+  // confirmedBarangays.size === 0 && effectiveGeneratedBarangays.size === 0 → no forecasts at all
+  // confirmedBarangays.size === 0 && effectiveGeneratedBarangays.size > 0  → pick a barangay
+  // else → show table
+  const showSkeleton     = isInitializing && confirmedBarangays.size > 0;
+  const showNoForecast   = !isInitializing && effectiveGeneratedBarangays.size === 0;
+  const showNoPick       = !isInitializing && effectiveGeneratedBarangays.size > 0 && confirmedBarangays.size === 0;
+  const showTable        = !isInitializing && confirmedBarangays.size > 0;
+
   return (
     <Box sx={{ display: 'flex', minHeight: '100vh', backgroundColor: T.pageBg }}>
       <Sidebar currentPage="prediction" onNavigate={onNavigate} onLogout={onLogout} />
@@ -1300,7 +1697,7 @@ const Prediction = ({ onNavigate, onLogout }) => {
           <SCard sx={{ mb: '14px' }}>
             <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2 }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flex: 1, minWidth: 0 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flex: 1, minWidth: 0, flexWrap: 'wrap' }}>
                   <BarangayPicker
                     availableBarangays={availableBarangays}
                     generatedBarangays={effectiveGeneratedBarangays}
@@ -1309,24 +1706,42 @@ const Prediction = ({ onNavigate, onLogout }) => {
                     onConfirm={handleConfirmBarangays}
                     confirmed={confirmedBarangays}
                   />
-                  <YearPicker
-                    availableYears={availableYears}
-                    selectedYear={selectedYear}
-                    onSelect={setSelectedYear}
-                  />
-                  {loadingBarangay && (
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <CircularProgress size={12} sx={{ color: T.blue }} />
-                      <Typography sx={{ fontSize: 11.5, color: T.textMuted }}>
-                        Loading {loadingBarangay}…
+
+                  {confirmedBarangays.size > 0 && !isInitializing && (
+                    <FilterDatePicker
+                      availableYears={availableYears}
+                      selectedYear={selectedYear}
+                      selectedMonth={selectedMonth}
+                      onSelect={handleFilterDateSelect}
+                    />
+                  )}
+
+                  {(selectedYear || selectedMonth) && confirmedBarangays.size > 0 && !isInitializing && (
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5,
+                      px: 1.25, py: 0.5, borderRadius: '6px',
+                      backgroundColor: T.blueDim, border: '1px solid rgba(37,99,235,0.2)' }}>
+                      <CalendarMonthIcon sx={{ fontSize: 11, color: T.blue }} />
+                      <Typography sx={{ fontSize: 11.5, fontWeight: 500, color: T.blue }}>
+                        {selectedMonth && selectedYear
+                          ? `${MONTH_NAMES[parseInt(selectedMonth, 10) - 1]} ${selectedYear}`
+                          : selectedYear || ''}
                       </Typography>
+                      <IconButton
+                        size="small"
+                        onClick={() => { setSelectedYear(null); setSelectedMonth(null); }}
+                        sx={{ p: 0.15, ml: 0.25, color: T.blue, '&:hover': { backgroundColor: 'rgba(37,99,235,0.15)' } }}
+                      >
+                        <CloseIcon sx={{ fontSize: 11 }} />
+                      </IconButton>
                     </Box>
                   )}
-                  {restoringSelection && !loadingBarangay && (
+
+                  {/* Loading indicator — shown during initial restore or per-barangay fetch */}
+                  {(isInitializing || loadingBarangay) && (
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                       <CircularProgress size={12} sx={{ color: T.blue }} />
                       <Typography sx={{ fontSize: 11.5, color: T.textMuted }}>
-                        Restoring selection…
+                        {loadingBarangay ? `Loading ${loadingBarangay}…` : 'Restoring selection…'}
                       </Typography>
                     </Box>
                   )}
@@ -1341,10 +1756,16 @@ const Prediction = ({ onNavigate, onLogout }) => {
             </CardContent>
           </SCard>
 
-          <SCard sx={{ flex: confirmedBarangays.size === 0 ? 1 : 'none',
-            display: 'flex', flexDirection: 'column' }}>
+          <SCard sx={{ flex: showTable ? 'none' : 1, display: 'flex', flexDirection: 'column' }}>
             <CardContent sx={{ p: 0, '&:last-child': { pb: 0 }, flex: 1, display: 'flex', flexDirection: 'column' }}>
-              {effectiveGeneratedBarangays.size === 0 && (
+
+              {/* ── Skeleton while restoring ── */}
+              {showSkeleton && (
+                <TableLoadingSkeleton barangayCount={confirmedBarangays.size} />
+              )}
+
+              {/* ── No forecast generated yet ── */}
+              {showNoForecast && (
                 <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column',
                   alignItems: 'center', justifyContent: 'center', textAlign: 'center', py: 4 }}>
                   <PsychologyIcon sx={{ fontSize: 38, color: T.textFaint, mb: 1.5 }} />
@@ -1363,7 +1784,9 @@ const Prediction = ({ onNavigate, onLogout }) => {
                   </Button>
                 </Box>
               )}
-              {effectiveGeneratedBarangays.size > 0 && confirmedBarangays.size === 0 && (
+
+              {/* ── Barangays available but none picked ── */}
+              {showNoPick && (
                 <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column',
                   alignItems: 'center', justifyContent: 'center', textAlign: 'center', py: 4 }}>
                   <LocationOnIcon sx={{ fontSize: 38, color: T.textFaint, mb: 1.5 }} />
@@ -1375,15 +1798,19 @@ const Prediction = ({ onNavigate, onLogout }) => {
                   </Typography>
                 </Box>
               )}
-              {confirmedBarangays.size > 0 && (
+
+              {/* ── Forecast table ── */}
+              {showTable && (
                 <ForecastTable
                   forecastHistory={forecastHistory}
                   confirmedBarangays={confirmedBarangays}
                   availableDiseases={availableDiseases}
                   selectedYear={selectedYear}
+                  selectedMonth={selectedMonth}
                   onRowClick={handleRowClick}
                 />
               )}
+
             </CardContent>
           </SCard>
         </Box>

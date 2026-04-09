@@ -12,12 +12,15 @@ class Config:
 
     # JWT token expiry — 8 hours
     JWT_ACCESS_TOKEN_EXPIRES = timedelta(hours=8)
+    FRONTEND_URL = os.environ.get('FRONTEND_URL') or 'http://localhost:3000'
 
-    # LSTM Parameters
+    # ── LSTM Parameters (optimized for speed) ─────────────────────────────────
+    # EPOCHS reduced: EarlyStopping with patience=8 handles convergence.
+    # For 36-month datasets, the model converges well before 50 epochs.
     SEQUENCE_LENGTH = 6
     FORECAST_MONTHS = 6
-    EPOCHS          = 100
-    BATCH_SIZE      = 16
+    EPOCHS          = 50       # was 100 — EarlyStopping kicks in much earlier anyway
+    BATCH_SIZE      = 32       # was 16 — larger batch = fewer gradient steps per epoch = faster
 
     # Database
     SQLALCHEMY_DATABASE_URI = (
@@ -31,5 +34,5 @@ class Config:
     MAIL_PORT     = 587
     MAIL_USE_TLS  = True
     MAIL_USERNAME = os.environ.get('MAIL_USERNAME') or 'predicthealth.noreply@gmail.com'
-    MAIL_PASSWORD = os.environ.get('MAIL_PASSWORD') or 'gjji dbxd ypjm wvql'  # Gmail App Password
+    MAIL_PASSWORD = os.environ.get('MAIL_PASSWORD') or 'gjji dbxd ypjm wvql'
     MAIL_DEFAULT_SENDER = ('PredictHealth', MAIL_USERNAME)

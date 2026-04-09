@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { ThemeProvider, createTheme } from "@mui/material/styles";
 import CssBaseline from "@mui/material/CssBaseline";
 import Login from "./Login";
@@ -8,6 +8,8 @@ import Prediction from "./Prediction";
 import DataImport from "./DataImport";
 import VerifyEmail from "./VerifyEmail";
 import Register from "./Register";
+import ForgotPassword from "./ForgotPassword";
+import { getCurrentUser } from "./services/api";
 
 const theme = createTheme({
   palette: {
@@ -33,25 +35,61 @@ const theme = createTheme({
   },
 });
 
+// ── Read reset token from URL (?token=xxx) ────────────────────────────────────
+// If present the user arrived from a password-reset email link.
+const getResetTokenFromUrl = () => {
+  const params = new URLSearchParams(window.location.search);
+  return params.get("token") || null;
+};
+
 function App() {
-  // ── Restore page only if valid JWT exists ──────────────────
+  // ── Detect special entry URLs ─────────────────────────────────────────────
+  const resetToken = getResetTokenFromUrl();
+
+  const [isAuthenticated, setIsAuthenticated] = useState(() => {
+    const token = localStorage.getItem("token");
+    return !!token;
+  });
+
   const [currentPage, setCurrentPage] = useState(() => {
-    // Handle /verify-email URL
+    // Password-reset link: /reset-password?token=xxx
+    if (
+      window.location.pathname === "/reset-password" &&
+      resetToken
+    ) {
+      return "forgot";
+    }
+    // Email verification link
     if (window.location.pathname === "/verify-email") {
       return "verify-email";
     }
-    const token = localStorage.getItem("token");
-    if (!token) {
+    if (!isAuthenticated) {
       localStorage.removeItem("currentPage");
       return "login";
     }
     return localStorage.getItem("currentPage") || "dashboard";
   });
 
-  // ── uploadedFile: actual File object (lost on refresh — normal) ──
-  const [uploadedFile, setUploadedFile] = useState(null);
+  // Validate token on app load
+  useEffect(() => {
+    if (isAuthenticated) {
+      getCurrentUser().then(() => {
+        // Valid
+      }).catch(() => {
+        // Invalid, logout
+        setIsAuthenticated(false);
+        setCurrentPage("login");
+        localStorage.removeItem("currentPage");
+        localStorage.removeItem("token");
+        localStorage.removeItem("username");
+        localStorage.removeItem("role");
+        localStorage.removeItem("fullName");
+        localStorage.removeItem("email");
+      });
+    }
+  }, [isAuthenticated]);
 
-  // ── uploadedData: metadata from localStorage (survives refresh) ──
+  const [uploadedFile, setUploadedFile] = useState(null);
   const [uploadedData, setUploadedData] = useState(() => {
     try {
       const saved = localStorage.getItem("uploadedData");
@@ -72,6 +110,7 @@ function App() {
     localStorage.removeItem("username");
     localStorage.removeItem("role");
     localStorage.removeItem("fullName");
+    localStorage.removeItem("email");
     localStorage.removeItem("uploadedData");
     localStorage.removeItem("availableBarangays");
     localStorage.removeItem("diseaseColumns");
@@ -80,23 +119,23 @@ function App() {
     localStorage.removeItem("datasetEndDate");
     setUploadedFile(null);
     setUploadedData(null);
+    setIsAuthenticated(false);
     setCurrentPage("login");
   };
 
   const handleDataUploaded = (data) => {
     setUploadedFile(data.file);
     setUploadedData({
-      file: data.file,
-      fileName: data.file?.name,
-      fileSize: data.file?.size,
+      file:       data.file,
+      fileName:   data.file?.name,
+      fileSize:   data.file?.size,
       uploadDate: data.uploadDate,
     });
   };
 
-  // ── Shared props for all authenticated pages ───────────────
   const sharedProps = {
-    onNavigate: handleNavigate,
-    onLogout: handleLogout,
+    onNavigate:   handleNavigate,
+    onLogout:     handleLogout,
     uploadedFile: uploadedFile,
     uploadedData: uploadedData,
   };
@@ -107,8 +146,12 @@ function App() {
       <div>
         {currentPage === "login" && (
           <Login
-            onLogin={() => handleNavigate("dashboard")}
+            onLogin={() => {
+              setIsAuthenticated(true);
+              handleNavigate("dashboard");
+            }}
             onGoToRegister={() => setCurrentPage("register")}
+            onForgotPassword={() => setCurrentPage("forgot")}
           />
         )}
 
@@ -125,10 +168,22 @@ function App() {
           />
         )}
 
-        {currentPage === "dashboard" && (
-          // ✅ FIXED: uploadedFile at uploadedData ay pinapasa na
-          <Dashboard {...sharedProps} />
+        {currentPage === "forgot" && (
+          <ForgotPassword
+            // If user arrived via reset-password link, pass the token so
+            // ForgotPassword skips straight to the "Set New Password" step.
+            token={resetToken}
+            onBack={() => {
+              // Clean up the URL if we came from a reset link
+              if (resetToken) {
+                window.history.replaceState({}, "", "/");
+              }
+              setCurrentPage("login");
+            }}
+          />
         )}
+
+        {currentPage === "dashboard" && <Dashboard {...sharedProps} />}
 
         {currentPage === "history" && <History {...sharedProps} />}
 
