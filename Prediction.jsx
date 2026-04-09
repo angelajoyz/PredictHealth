@@ -390,11 +390,26 @@ const DiseaseDetailPanel = ({ barangay, forecastData, city, onClose }) => {
     actual: Math.round(filteredHistVals[i] ?? 0),
   }));
 
-  const forecastChartData = dates.map((d, i) => ({
-    month: d.slice(0,7),
-    label: formatMonthLabel(d.slice(0,7)),
-    predicted: Math.round(preds[i] ?? 0),
-  }));
+  // Build combined chart data: actual where available, forecast otherwise
+  const forecastYear = dates.length > 0 ? dates[0].slice(0, 4) : new Date().getFullYear();
+  const monthMap = {};
+  
+  // First, add all forecast data
+  dates.forEach((d, i) => {
+    const month = d.slice(0, 7);
+    monthMap[month] = { month, label: formatMonthLabel(month), predicted: Math.round(preds[i] ?? 0) };
+  });
+  
+  // Then, check if any forecast months also have actual data (they shouldn't normally, but just in case)
+  histDates.forEach((d, i) => {
+    const month = d.slice(0, 7);
+    if (monthMap[month]) {
+      // Month exists in forecast — add actual data too
+      monthMap[month].actual = Math.round(histVals[i] ?? 0);
+    }
+  });
+  
+  const forecastChartData = Object.values(monthMap);
 
   const firstVal = preds[0] ?? 0;
   const lastVal  = preds[preds.length - 1] ?? 0;
@@ -1491,7 +1506,7 @@ const buildHistoryEntries = (result, brgy, cityLabel) => {
       disease,
       label: getDiseaseInfo(disease).label,
       period: fd.slice(0, 7),
-      predictedValue: Math.round(preds[i] ?? 0),
+      predictedValue: preds[i] ?? 0,
       trend,
       barangay: brgy,
       city: result.city || cityLabel,

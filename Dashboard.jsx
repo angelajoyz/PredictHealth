@@ -512,7 +512,6 @@ const Dashboard = ({ onNavigate, onLogout }) => {
   const [latestForecastMonth, setLatestForecastMonth]= useState('N/A');
   const [hasDbData,           setHasDbData]          = useState(false);
   const [checkingData,        setCheckingData]       = useState(true);
-  // ── Detects if a new file was uploaded after the last forecast generation ──
   const [hasNewUpload,        setHasNewUpload]       = useState(false);
 
   const [accumulatedChart, setAccumulatedChart] = useState(() => {
@@ -520,22 +519,18 @@ const Dashboard = ({ onNavigate, onLogout }) => {
     catch { return {}; }
   });
 
-  // ── Generation overlay state ────────────────────────────────────────────
   const [genOverlay, setGenOverlay] = useState({
     visible: false, progress: 0, total: 0, current: null, completed: [], failed: [],
   });
 
-  // ── Navigation block state ──────────────────────────────────────────────
   const [navBlockDialog, setNavBlockDialog] = useState(false);
   const pendingNavRef   = useRef(null);
   const isGeneratingRef = useRef(false);
 
   const cityLabel = localStorage.getItem('datasetCity') || '';
 
-  // ── Forecast params always based on current date ────────────────────────
   const { forecastMonths, referenceDate } = computeForecastParams();
 
-  // Real current & next month (for stat cards)
   const realNow          = new Date();
   const realCurrentMonth = new Date(realNow.getFullYear(), realNow.getMonth(), 1);
   const realNextMonth    = new Date(realNow.getFullYear(), realNow.getMonth() + 1, 1);
@@ -544,7 +539,6 @@ const Dashboard = ({ onNavigate, onLogout }) => {
   const currentMonthLabel = realCurrentMonth.toLocaleDateString('en-PH', { month: 'long', year: 'numeric' });
   const nextMonthLabel    = realNextMonth.toLocaleDateString('en-PH',    { month: 'long', year: 'numeric' });
 
-  // Chart range keys (same as referenceDate = today's month)
   const thisMonthDate = referenceDate;
   const thisMonthKey  = `${thisMonthDate.getFullYear()}-${String(thisMonthDate.getMonth() + 1).padStart(2, '0')}`;
 
@@ -608,7 +602,6 @@ const Dashboard = ({ onNavigate, onLogout }) => {
         }
         if (data.city) localStorage.setItem('datasetCity', data.city);
 
-        // ── Detect new upload vs last forecast generation ─────────────────
         try {
           const histRes = await fetch('http://localhost:5000/api/upload-history', {
             headers: { 'Authorization': `Bearer ${token}` },
@@ -734,8 +727,6 @@ const Dashboard = ({ onNavigate, onLogout }) => {
       if (idx < 0 || idx >= dates.length) return 0;
       return activeDiseases.reduce((s, d) => s + getValueAt(idx, d), 0);
     };
-    // For single disease: round each value individually
-    // For all diseases: round the sum
     let currentVal, nextVal;
     if (selectedDisease === 'all') {
       currentVal = Math.round(sumAt(currentIdx));
@@ -756,86 +747,52 @@ const Dashboard = ({ onNavigate, onLogout }) => {
     };
   };
 
+  // ── UPDATED buildChartData ─────────────────────────────────────────────────
+  // Uses forecast_dates as the single source of truth for which months to show.
+  // If a forecast month also has actual historical data, it shows as actual (solid line).
+  // Months outside the forecast range are excluded regardless of barangay.
   const buildChartData = () => {
-    const now = new Date();
-    const forecastYear = forecastData?.forecast_dates?.[0]?.slice(0, 4) || now.getFullYear();
-
-    // If the year is finished (current date > Dec 31 of forecast year), show no data
-    if (now > new Date(parseInt(forecastYear), 11, 31)) {
-      return [];
-    }
+    const forecastDates = forecastData?.forecast_dates || [];
+    if (forecastDates.length === 0) return [];
 
     const historical = forecastData?.historical_data;
-    const forecastDates = forecastData?.forecast_dates || [];
-    const months = [];
-    for (let month = 0; month < 12; month++) {
-      const date = new Date(forecastYear, month, 1);
-      months.push({
-        month: date.toISOString().slice(0, 7), // YYYY-MM
-        dateObj: date,
-        isActual: false,
-        value: null
-      });
-    }
 
-    // Fill actual data where available
-    if (historical?.dates) {
-      historical.dates.forEach((histDate, idx) => {
-        const histMonth = histDate.slice(0, 7);
-        const monthEntry = months.find(m => m.month === histMonth);
-        if (monthEntry) {
-          let actualValue = 0;
+    return forecastDates.map((fcDate, i) => {
+      const month = fcDate.slice(0, 7);
+
+      // Compute forecast value for this month
+      let forecastValue = 0;
+      if (selectedDisease === 'all') {
+        activeDiseases.forEach(d => {
+          forecastValue += (forecastData.predictions[d] || [])[i] || 0;
+        });
+      } else {
+        forecastValue = (forecastData.predictions[selectedDisease] || [])[i] || 0;
+      }
+
+      // Check if this forecast month also has actual historical data
+      let actualValue = null;
+      if (historical?.dates) {
+        const histIdx = historical.dates.findIndex(d => d.slice(0, 7) === month);
+        if (histIdx >= 0) {
+          let val = 0;
           if (selectedDisease === 'all') {
             activeDiseases.forEach(d => {
               const series = historical[d] || [];
-              actualValue += series[idx] || 0;
+              val += series[histIdx] || 0;
             });
           } else {
             const series = historical[selectedDisease] || [];
-            actualValue = series[idx] || 0;
+            val = series[histIdx] || 0;
           }
-          monthEntry.isActual = true;
-          monthEntry.value = Math.round(actualValue);
+          actualValue = Math.round(val);
         }
-      });
-    }
-
-    // Fill forecast data where actual is not available
-    forecastDates.forEach((fcDate, idx) => {
-      const fcMonth = fcDate.slice(0, 7);
-      const monthEntry = months.find(m => m.month === fcMonth);
-      if (monthEntry && !monthEntry.isActual) {
-        let forecastValue = 0;
-        if (selectedDisease === 'all') {
-          activeDiseases.forEach(d => {
-            forecastValue += (forecastData.predictions[d] || [])[idx] || 0;
-          });
-        } else {
-          forecastValue = (forecastData.predictions[selectedDisease] || [])[idx] || 0;
-        }
-        monthEntry.value = Math.round(forecastValue);
       }
-    });
 
-    // Return months with data, separating actual and predicted
-    const actualData = months.filter(m => m.isActual).map(m => ({
-      month: m.month,
-      actual: m.value
-    }));
-    const predictedData = months.filter(m => !m.isActual && m.value !== null).map(m => ({
-      month: m.month,
-      predicted: m.value
-    }));
-
-    // Merge into a single array with both keys
-    const allMonths = [...new Set([...actualData.map(d => d.month), ...predictedData.map(d => d.month)])].sort();
-    return allMonths.map(month => {
-      const actualEntry = actualData.find(d => d.month === month);
-      const predictedEntry = predictedData.find(d => d.month === month);
       return {
         month,
-        actual: actualEntry ? actualEntry.actual : null,
-        predicted: predictedEntry ? predictedEntry.predicted : null
+        actual: actualValue,
+        predicted: actualValue === null ? Math.round(forecastValue) : null,
       };
     });
   };
@@ -868,7 +825,6 @@ const Dashboard = ({ onNavigate, onLogout }) => {
     return items;
   };
 
-  // ── Generate click: new upload or no forecasts → go directly, else confirm ─
   const handleGenerateClick = () => {
     if (!hasDbData || availableBarangays.length === 0) {
       setForecastError('No dataset found. Please upload in Data Import first.');
@@ -1050,7 +1006,6 @@ const Dashboard = ({ onNavigate, onLogout }) => {
                 </Button>
               </Box>
               <Box sx={{ mt: 1.5, px: '2px' }}>
-                {/* New upload detected — show amber banner */}
                 {hasNewUpload && hasDbData && (
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75,
                     px: 1.5, py: 0.9, borderRadius: '7px',
