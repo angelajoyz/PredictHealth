@@ -1090,9 +1090,6 @@ const Dashboard = ({ onNavigate, onLogout }) => {
                 </Box>
                 <Typography sx={{ fontSize: 14, fontWeight: 700, color: T.textHead, lineHeight: 1.3 }}>{cityLabel || '—'}</Typography>
                 <Typography sx={{ fontSize: 12, color: T.textMuted, mt: 0.25 }}>{selectedBarangay === ALL_BARANGAYS ? 'All Barangays' : (selectedBarangay || '—')}</Typography>
-                <Typography sx={{ fontSize: 10.5, color: T.textFaint, mt: 0.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {uploadedInfo?.fileName || 'No dataset loaded'}
-                </Typography>
               </CardContent>
             </SCard>
 
