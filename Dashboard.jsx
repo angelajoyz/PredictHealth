@@ -37,7 +37,7 @@ const computeForecastParams = () => {
   if (datasetEndRaw) {
     const parsed = new Date(datasetEndRaw);
     if (!Number.isNaN(parsed.getTime())) {
-      forecastYear = parsed.getFullYear() + (parsed.getMonth() === 11 ? 1 : 0); // If data ends Dec, forecast next year
+      forecastYear = parsed.getFullYear() + 1; // Always forecast the next calendar year after the uploaded dataset ends
     }
   }
 
