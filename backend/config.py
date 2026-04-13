@@ -36,3 +36,5 @@ class Config:
     MAIL_USERNAME = os.environ.get('MAIL_USERNAME') or 'predicthealth.noreply@gmail.com'
     MAIL_PASSWORD = os.environ.get('MAIL_PASSWORD') or 'gjji dbxd ypjm wvql'
     MAIL_DEFAULT_SENDER = ('PredictHealth', MAIL_USERNAME)
+
+    #hatdog
