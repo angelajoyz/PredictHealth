@@ -852,6 +852,10 @@ const computeTrend = (diseaseEntries) => {
   return t === 'increasing' ? 'Increasing' : t === 'decreasing' ? 'Decreasing' : 'Stable';
 };
 
+// ── Beautiful Export ──────────────────────────────────────────────────────────
+// Drop-in replacement for the exportTableData function in Prediction.jsx
+// Supports: 'pdf' (HTML report → print-to-PDF), 'csv', 'txt'
+
 const exportTableData = async (format, forecastHistory, selectedBarangays, availableDiseases, cityLabel) => {
   if (!forecastHistory?.length || selectedBarangays.size === 0) return;
 
@@ -869,7 +873,7 @@ const exportTableData = async (format, forecastHistory, selectedBarangays, avail
 
   const city = localStorage.getItem('datasetCity') || '';
   const breakdownCache = {};
-  const breakdownKeys  = [];
+  const breakdownKeys = [];
   [...selectedBarangays].forEach(barangay => {
     diseases.forEach(d => {
       const key = `${barangay}::${d.replace('_cases', '')}`;
@@ -896,13 +900,13 @@ const exportTableData = async (format, forecastHistory, selectedBarangays, avail
     Object.keys(lookup[barangay] || {}).sort().forEach(period => {
       const diseaseMap = lookup[barangay][period] || {};
       diseases.forEach(d => {
-        const entry      = diseaseMap[d];
-        const predicted  = Math.round(entry?.predictedValue ?? 0);
-        const trend      = diseaseTrendMap[d] || 'Stable';
-        const catKey     = d.replace('_cases', '');
+        const entry = diseaseMap[d];
+        const predicted = Math.round(entry?.predictedValue ?? 0);
+        const trend = diseaseTrendMap[d] || 'Stable';
+        const catKey = d.replace('_cases', '');
         const topDisease = breakdownCache[`${barangay}::${catKey}`] || '—';
-        const dInfo      = getDiseaseInfo(d);
-        rows.push({ barangay, year: getPeriodYear(period) || '', month: formatMonthLabel(period), category: dInfo.label, predicted, trend, topDisease });
+        const dInfo = getDiseaseInfo(d);
+        rows.push({ barangay, year: getPeriodYear(period) || '', month: formatMonthLabel(period), period, category: dInfo.label, color: dInfo.color, disease: d, predicted, trend, topDisease });
       });
     });
   });
@@ -910,18 +914,23 @@ const exportTableData = async (format, forecastHistory, selectedBarangays, avail
   if (rows.length === 0) return;
   const timestamp = new Date().toISOString().slice(0, 10);
 
+  // ── CSV Export ──────────────────────────────────────────────────────────────
   if (format === 'csv') {
-    const headers = ['Barangay','Year','Month','Disease Category','Predicted Cases','Trend','Top Specific Disease (Analysis)'];
+    const headers = ['Barangay', 'Year', 'Month', 'Disease Category', 'Predicted Cases', 'Trend', 'Top Specific Disease (Analysis)'];
     const csvRows = [
       headers.join(','),
       ...rows.map(r => [`"${r.barangay}"`, r.year, r.month, `"${r.category}"`, r.predicted, r.trend, `"${r.topDisease}"`].join(',')),
     ];
     const blob = new Blob(['\uFEFF' + csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
     a.href = url; a.download = `forecast_${timestamp}.csv`; a.click();
     URL.revokeObjectURL(url);
-  } else {
+    return;
+  }
+
+  // ── TXT Export ─────────────────────────────────────────────────────────────
+  if (format === 'txt') {
     const lines = ['PREDICTHEALTH — BARANGAY FORECAST REPORT', '='.repeat(66)];
     if (cityLabel) lines.push(`City     : ${cityLabel}`);
     lines.push(`Generated: ${new Date().toLocaleDateString('en-PH', { dateStyle: 'long' })}`);
@@ -958,9 +967,615 @@ const exportTableData = async (format, forecastHistory, selectedBarangays, avail
     lines.push('End of Report — PredictHealth');
 
     const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8;' });
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
     a.href = url; a.download = `forecast_${timestamp}.txt`; a.click();
+    URL.revokeObjectURL(url);
+    return;
+  }
+
+  // ── PDF / HTML Report Export ───────────────────────────────────────────────
+  if (format === 'pdf') {
+    // Build per-barangay data structures
+    const barangayList = [...selectedBarangays];
+
+    // Aggregate: all periods, per barangay
+    const barangayData = {};
+    barangayList.forEach(brgy => {
+      const brgyRows = rows.filter(r => r.barangay === brgy);
+      const periods = [...new Set(brgyRows.map(r => r.period))].sort();
+      const diseaseList = [...new Set(brgyRows.map(r => r.disease))];
+
+      // Per-disease totals & trends
+      const diseaseSummary = diseaseList.map(d => {
+        const dRows = brgyRows.filter(r => r.disease === d);
+        const total = dRows.reduce((s, r) => s + r.predicted, 0);
+        const trend = dRows[0]?.trend || 'Stable';
+        const info = getDiseaseInfo(d);
+        const monthlyVals = periods.map(p => {
+          const found = dRows.find(r => r.period === p);
+          return found ? found.predicted : 0;
+        });
+        // Peak month
+        let peakIdx = 0;
+        monthlyVals.forEach((v, i) => { if (v > monthlyVals[peakIdx]) peakIdx = i; });
+        const peakMonth = periods[peakIdx] ? formatMonthLabel(periods[peakIdx]) + ' ' + getPeriodYear(periods[peakIdx]) : '—';
+        return { disease: d, label: info.label, color: info.color, total, trend, peakMonth, monthlyVals, share: 0 };
+      });
+
+      const grandTotal = diseaseSummary.reduce((s, d) => s + d.total, 0);
+      diseaseSummary.forEach(d => { d.share = grandTotal > 0 ? ((d.total / grandTotal) * 100).toFixed(1) : '0.0'; });
+      diseaseSummary.sort((a, b) => b.total - a.total);
+
+      // Monthly totals
+      const monthlyTotals = periods.map(p => {
+        const pRows = brgyRows.filter(r => r.period === p);
+        return { period: p, label: formatMonthLabel(p), year: getPeriodYear(p), total: pRows.reduce((s, r) => s + r.predicted, 0) };
+      });
+
+      // Trend stats
+      const increasing = diseaseSummary.filter(d => d.trend === 'Increasing').length;
+      const decreasing = diseaseSummary.filter(d => d.trend === 'Decreasing').length;
+      const stable = diseaseSummary.filter(d => d.trend === 'Stable').length;
+
+      // Overall trend
+      const firstTotal = monthlyTotals[0]?.total || 0;
+      const lastTotal = monthlyTotals[monthlyTotals.length - 1]?.total || 0;
+      const overallPct = firstTotal > 0 ? (((lastTotal - firstTotal) / firstTotal) * 100).toFixed(1) : '0.0';
+      const overallTrend = parseFloat(overallPct) > 10 ? 'increase' : parseFloat(overallPct) < -10 ? 'decrease' : 'remain stable';
+
+      // Peak month
+      let peakMonthObj = monthlyTotals[0];
+      monthlyTotals.forEach(m => { if (m.total > peakMonthObj.total) peakMonthObj = m; });
+
+      barangayData[brgy] = { diseaseSummary, monthlyTotals, grandTotal, increasing, decreasing, stable, overallPct, overallTrend, peakMonthObj, periods, diseaseList };
+    });
+
+    // City-wide summary
+    const cityDiseaseMap = {};
+    rows.forEach(r => {
+      if (!cityDiseaseMap[r.disease]) cityDiseaseMap[r.disease] = { label: r.category, color: r.color, total: 0, trend: r.trend, peakVal: 0, peakMonth: '' };
+      cityDiseaseMap[r.disease].total += r.predicted;
+    });
+    // Determine peak month per disease across all barangays
+    diseases.forEach(d => {
+      if (!cityDiseaseMap[d]) return;
+      const dRows = rows.filter(r => r.disease === d);
+      const periodTotals = {};
+      dRows.forEach(r => { periodTotals[r.period] = (periodTotals[r.period] || 0) + r.predicted; });
+      let peakP = Object.keys(periodTotals)[0];
+      Object.keys(periodTotals).forEach(p => { if (periodTotals[p] > (periodTotals[peakP] || 0)) peakP = p; });
+      cityDiseaseMap[d].peakMonth = peakP ? `${formatMonthLabel(peakP)} ${getPeriodYear(peakP)}` : '—';
+      // Re-derive city trend from per-barangay trends
+      const trendCounts = { Increasing: 0, Decreasing: 0, Stable: 0 };
+      barangayList.forEach(brgy => {
+        const bd = barangayData[brgy];
+        const ds = bd.diseaseSummary.find(x => x.disease === d);
+        if (ds) trendCounts[ds.trend]++;
+      });
+      const dominant = Object.entries(trendCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || 'Stable';
+      cityDiseaseMap[d].trend = dominant;
+    });
+
+    const cityDiseases = Object.entries(cityDiseaseMap)
+      .map(([d, v]) => ({ disease: d, ...v }))
+      .sort((a, b) => b.total - a.total);
+    const cityTotal = cityDiseases.reduce((s, d) => s + d.total, 0);
+    cityDiseases.forEach(d => { d.share = cityTotal > 0 ? ((d.total / cityTotal) * 100).toFixed(1) : '0.0'; });
+
+    // Top disease by barangay
+    const topBarangay = barangayList.reduce((top, brgy) =>
+      (barangayData[brgy].grandTotal > (barangayData[top]?.grandTotal || 0)) ? brgy : top,
+      barangayList[0]
+    );
+
+    const cityIncreasing = cityDiseases.filter(d => d.trend === 'Increasing').length;
+    const cityIncPct = cityDiseases.length > 0 ? Math.round((cityIncreasing / cityDiseases.length) * 100) : 0;
+
+    // ── SVG Chart Builders ──────────────────────────────────────────────────
+
+    // Mini bar chart SVG
+    const buildBarChart = (items, width = 480, height = 220) => {
+      if (!items.length) return '<svg></svg>';
+      const maxVal = Math.max(...items.map(i => i.value));
+      const barH = Math.floor((height - 40) / items.length) - 4;
+      const labelW = 130;
+      const barMaxW = width - labelW - 60;
+
+      const bars = items.map((item, i) => {
+        const barW = maxVal > 0 ? Math.round((item.value / maxVal) * barMaxW) : 0;
+        const y = 10 + i * (barH + 4);
+        const color = item.color || '#3B82F6';
+        return `
+          <text x="${labelW - 8}" y="${y + barH / 2 + 4}" text-anchor="end" font-size="10" fill="#6B7280"
+            font-family="Inter,system-ui,sans-serif">${item.label.length > 18 ? item.label.slice(0, 17) + '…' : item.label}</text>
+          <rect x="${labelW}" y="${y}" width="${barW}" height="${barH}" rx="3" fill="${color}" opacity="0.85"/>
+          <text x="${labelW + barW + 5}" y="${y + barH / 2 + 4}" font-size="10" fill="#374151"
+            font-family="Inter,system-ui,sans-serif" font-weight="600">${item.value.toLocaleString()}</text>
+        `;
+      }).join('');
+
+      return `<svg viewBox="0 0 ${width} ${items.length * (barH + 4) + 20}" xmlns="http://www.w3.org/2000/svg" width="${width}">${bars}</svg>`;
+    };
+
+    // Line chart SVG
+    const buildLineChart = (seriesList, periodLabels, width = 480, height = 180) => {
+      const pad = { top: 16, right: 16, bottom: 28, left: 38 };
+      const cW = width - pad.left - pad.right;
+      const cH = height - pad.top - pad.bottom;
+      const n = periodLabels.length;
+      if (n < 2) return '';
+
+      const allVals = seriesList.flatMap(s => s.values);
+      const maxV = Math.max(...allVals, 1);
+      const minV = 0;
+
+      const xOf = i => pad.left + (i / (n - 1)) * cW;
+      const yOf = v => pad.top + cH - ((v - minV) / (maxV - minV)) * cH;
+
+      // Grid lines
+      const gridLines = [0, 0.25, 0.5, 0.75, 1].map(f => {
+        const v = Math.round(maxV * f);
+        const y = yOf(v);
+        return `<line x1="${pad.left}" y1="${y}" x2="${pad.left + cW}" y2="${y}" stroke="#E5E7EB" stroke-width="1"/>
+                 <text x="${pad.left - 4}" y="${y + 3.5}" text-anchor="end" font-size="9" fill="#9CA3AF" font-family="Inter,sans-serif">${v >= 1000 ? (v / 1000).toFixed(1) + 'k' : v}</text>`;
+      }).join('');
+
+      // X axis labels
+      const xLabels = periodLabels.map((label, i) => {
+        if (n <= 8 || i === 0 || i === n - 1 || i % Math.ceil(n / 6) === 0) {
+          return `<text x="${xOf(i)}" y="${pad.top + cH + 14}" text-anchor="middle" font-size="9" fill="#9CA3AF" font-family="Inter,sans-serif">${label.slice(0, 3)}</text>`;
+        }
+        return '';
+      }).join('');
+
+      // Lines & dots
+      const linesAndDots = seriesList.map(series => {
+        const pts = series.values.map((v, i) => `${xOf(i)},${yOf(v)}`).join(' ');
+        const dots = series.values.map((v, i) =>
+          `<circle cx="${xOf(i)}" cy="${yOf(v)}" r="3" fill="${series.color}" stroke="#fff" stroke-width="1.5"/>`
+        ).join('');
+        const dash = series.dashed ? 'stroke-dasharray="5,3"' : '';
+        return `<polyline points="${pts}" fill="none" stroke="${series.color}" stroke-width="2" ${dash} stroke-linejoin="round"/>
+                 ${dots}`;
+      }).join('');
+
+      // Legend
+      const legendItems = seriesList.map((s, i) =>
+        `<g transform="translate(${pad.left + i * 90}, ${height - 4})">
+           <rect x="0" y="-6" width="12" height="3" rx="1.5" fill="${s.color}" ${s.dashed ? 'opacity="0.7"' : ''}/>
+           <text x="16" y="0" font-size="9" fill="#6B7280" font-family="Inter,sans-serif">${s.label.slice(0, 11)}</text>
+         </g>`
+      ).join('');
+
+      return `<svg viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
+        ${gridLines}
+        ${xLabels}
+        ${linesAndDots}
+        ${legendItems}
+      </svg>`;
+    };
+
+    // Donut chart SVG
+    const buildDonutChart = (segments, size = 120) => {
+      const cx = size / 2, cy = size / 2, r = size * 0.38, innerR = size * 0.24;
+      let startAngle = -Math.PI / 2;
+      const total = segments.reduce((s, seg) => s + seg.value, 0);
+
+      const paths = segments.map(seg => {
+        const angle = total > 0 ? (seg.value / total) * 2 * Math.PI : 0;
+        const endAngle = startAngle + angle;
+        const x1 = cx + r * Math.cos(startAngle), y1 = cy + r * Math.sin(startAngle);
+        const x2 = cx + r * Math.cos(endAngle), y2 = cy + r * Math.sin(endAngle);
+        const ix1 = cx + innerR * Math.cos(endAngle), iy1 = cy + innerR * Math.sin(endAngle);
+        const ix2 = cx + innerR * Math.cos(startAngle), iy2 = cy + innerR * Math.sin(startAngle);
+        const largeArc = angle > Math.PI ? 1 : 0;
+        const d = `M ${x1} ${y1} A ${r} ${r} 0 ${largeArc} 1 ${x2} ${y2} L ${ix1} ${iy1} A ${innerR} ${innerR} 0 ${largeArc} 0 ${ix2} ${iy2} Z`;
+        startAngle = endAngle;
+        return `<path d="${d}" fill="${seg.color}" opacity="0.9"/>`;
+      }).join('');
+
+      const pcts = segments.map((s, i) => {
+        const angle = total > 0 ? (s.value / total) * 2 * Math.PI : 0;
+        const mid = -Math.PI / 2 + segments.slice(0, i).reduce((acc, x) => acc + (x.value / total) * 2 * Math.PI, 0) + angle / 2;
+        const px = cx + (r + 10) * Math.cos(mid), py = cy + (r + 10) * Math.sin(mid);
+        const pct = total > 0 ? Math.round((s.value / total) * 100) : 0;
+        if (pct < 5) return '';
+        return `<text x="${px}" y="${py}" text-anchor="middle" font-size="8.5" fill="${s.color}" font-family="Inter,sans-serif" font-weight="700">${pct}%</text>`;
+      }).join('');
+
+      return `<svg viewBox="0 0 ${size} ${size}" xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}">
+        ${paths}
+        ${pcts}
+        <circle cx="${cx}" cy="${cy}" r="${innerR}" fill="white"/>
+      </svg>`;
+    };
+
+    // Trend color helpers
+    const tC = t => t === 'Increasing' ? '#DC2626' : t === 'Decreasing' ? '#16A34A' : '#6B7280';
+    const tBg = t => t === 'Increasing' ? '#FEF2F2' : t === 'Decreasing' ? '#F0FDF4' : '#F9FAFB';
+    const tBd = t => t === 'Increasing' ? '#FECACA' : t === 'Decreasing' ? '#BBF7D0' : '#E5E7EB';
+    const tArrow = t => t === 'Increasing' ? '↑' : t === 'Decreasing' ? '↓' : '—';
+
+    const trendPill = t => `<span style="display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:999px;background:${tBg(t)};border:1px solid ${tBd(t)};color:${tC(t)};font-size:11px;font-weight:600;">${tArrow(t)} ${t}</span>`;
+
+    // ── Build HTML ──────────────────────────────────────────────────────────
+
+    // Executive summary page
+    const cityBarChart = buildBarChart(cityDiseases.slice(0, 10).map(d => ({ label: d.label, value: d.total, color: d.color })), 460, 240);
+    const cityDonut = buildDonutChart([
+      { value: cityIncreasing, color: '#EF4444', label: 'Increasing' },
+      { value: cityDiseases.filter(d => d.trend === 'Stable').length, color: '#94A3B8', label: 'Stable' },
+      { value: cityDiseases.filter(d => d.trend === 'Decreasing').length, color: '#22C55E', label: 'Decreasing' },
+    ], 120);
+
+    const cityTableRows = cityDiseases.map((d, i) => `
+      <tr style="border-bottom:1px solid #F3F4F6;">
+        <td style="padding:9px 12px;font-weight:${i === 0 ? 700 : 400};color:${i === 0 ? '#111827' : '#374151'};font-size:13px;">
+          ${i === 0 ? '★ ' : ''}${d.label}
+        </td>
+        <td style="padding:9px 12px;text-align:right;font-weight:700;font-size:13px;color:#111827;">${d.total.toLocaleString()}</td>
+        <td style="padding:9px 12px;text-align:right;font-size:13px;color:#6B7280;">${d.share}%</td>
+        <td style="padding:9px 12px;text-align:center;">${trendPill(d.trend)}</td>
+        <td style="padding:9px 12px;text-align:center;font-size:13px;color:#6B7280;">${d.peakMonth}</td>
+      </tr>
+    `).join('');
+
+    // Per-barangay sections
+    const barangaySections = barangayList.map(brgy => {
+      const bd = barangayData[brgy];
+      const { diseaseSummary, monthlyTotals, grandTotal, increasing, decreasing, stable, overallPct, overallTrend, peakMonthObj, periods } = bd;
+
+      // Line chart: top 5 diseases + total
+      const top5 = diseaseSummary.slice(0, 5);
+      const chartSeries = [
+        ...top5.map(d => ({ label: d.label, color: d.color, values: d.monthlyVals, dashed: false })),
+        { label: 'Total', color: '#1D4ED8', values: monthlyTotals.map(m => m.total), dashed: true },
+      ];
+      const periodLabels = periods.map(p => formatMonthLabel(p));
+      const lineChart = buildLineChart(chartSeries, periodLabels, 560, 200);
+
+      // Bar chart: disease burden
+      const barChart = buildBarChart(diseaseSummary.map(d => ({ label: d.label, value: d.total, color: d.color })), 480, 240);
+
+      // Disease trend table rows
+      const diseaseTrendRows = diseaseSummary.map(d => `
+        <tr style="border-bottom:1px solid #F3F4F6;">
+          <td style="padding:8px 12px;font-size:13px;color:#374151;">${d.label}</td>
+          <td style="padding:8px 12px;text-align:right;font-weight:700;font-size:13px;color:#111827;">${d.total.toLocaleString()}</td>
+          <td style="padding:8px 12px;text-align:right;font-size:13px;color:#6B7280;">${d.share}%</td>
+          <td style="padding:8px 12px;text-align:center;">${trendPill(d.trend)}</td>
+          <td style="padding:8px 12px;text-align:center;font-size:13px;color:#6B7280;">${d.peakMonth}</td>
+        </tr>
+      `).join('');
+
+      // Monthly data table — top diseases columns
+      const colDiseases = diseaseSummary.slice(0, 6);
+      const headerCols = colDiseases.map(d =>
+        `<th style="padding:9px 10px;text-align:right;font-size:11px;font-weight:600;color:#6B7280;white-space:nowrap;">${d.label}</th>`
+      ).join('') + '<th style="padding:9px 10px;text-align:right;font-size:11px;font-weight:600;color:#374151;">TOTAL</th>';
+
+      const monthRows = monthlyTotals.map(m => {
+        const mRows = rows.filter(r => r.barangay === brgy && r.period === m.period);
+        const dCells = colDiseases.map(d => {
+          const mRow = mRows.find(r => r.disease === d.disease);
+          return `<td style="padding:8px 10px;text-align:right;font-size:12px;color:#374151;">${(mRow?.predicted || 0).toLocaleString()}</td>`;
+        }).join('');
+        return `<tr style="border-bottom:1px solid #F3F4F6;">
+          <td style="padding:8px 12px;font-size:12px;font-weight:500;color:#374151;white-space:nowrap;">${m.label}</td>
+          <td style="padding:8px 10px;text-align:center;font-size:12px;color:#6B7280;">${m.year}</td>
+          ${dCells}
+          <td style="padding:8px 10px;text-align:right;font-size:12px;font-weight:700;color:#111827;">${m.total.toLocaleString()}</td>
+        </tr>`;
+      }).join('');
+
+      const totalRow = `<tr style="border-top:2px solid #E5E7EB;background:#F8FAFC;">
+        <td colspan="2" style="padding:9px 12px;font-size:12px;font-weight:700;color:#111827;">TOTAL</td>
+        ${colDiseases.map(d => `<td style="padding:9px 10px;text-align:right;font-size:12px;font-weight:700;color:#111827;">${d.total.toLocaleString()}</td>`).join('')}
+        <td style="padding:9px 10px;text-align:right;font-size:12px;font-weight:700;color:#111827;">${grandTotal.toLocaleString()}</td>
+      </tr>`;
+
+      // Analysis bullets
+      const topDisease = diseaseSummary[0];
+      const increasingDiseases = diseaseSummary.filter(d => d.trend === 'Increasing');
+      const analysisPoints = [
+        `<strong>${topDisease.label}</strong> accounts for the largest share of cases (${topDisease.total.toLocaleString()} cases, ${topDisease.share}% of total).`,
+        increasingDiseases.length > 0
+          ? `<strong>${increasingDiseases.map(d => d.label).join(', ')}</strong> show${increasingDiseases.length === 1 ? 's' : ''} an increasing trend.`
+          : 'No disease categories show an increasing trend.',
+        `Peak disease burden is projected for <strong>${peakMonthObj.label} ${peakMonthObj.year}</strong> with ${peakMonthObj.total.toLocaleString()} total cases.`,
+        `Overall, total cases are forecast to <strong>${overallTrend} by ${Math.abs(parseFloat(overallPct))}%</strong> from ${monthlyTotals[0]?.label} ${monthlyTotals[0]?.year} to ${monthlyTotals[monthlyTotals.length - 1]?.label} ${monthlyTotals[monthlyTotals.length - 1]?.year}.`,
+      ];
+
+      return `
+        <!-- ══ BARANGAY BREAK ══ -->
+        <div style="page-break-before:always;"></div>
+
+        <!-- Barangay Header -->
+        <div style="background:linear-gradient(135deg,#1e3a5f 0%,#1D4ED8 100%);color:white;padding:28px 36px;border-radius:12px;margin-bottom:20px;">
+          <div style="font-size:11px;letter-spacing:2px;opacity:0.7;text-transform:uppercase;margin-bottom:4px;">Barangay Report</div>
+          <div style="font-size:26px;font-weight:800;letter-spacing:-0.5px;margin-bottom:2px;">${brgy}</div>
+          <div style="font-size:13px;opacity:0.8;">${cityLabel || 'City'} · ${diseaseSummary.length} Disease Categories · ${periods.length} Month Forecast</div>
+        </div>
+
+        <!-- Stat Cards -->
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px;">
+          ${[
+            { label: 'Total Forecast Cases', value: grandTotal.toLocaleString(), sub: 'All diseases, all months', color: '#1D4ED8' },
+            { label: 'Increasing Trends', value: increasing, sub: 'Diseases rising >10%', color: '#DC2626' },
+            { label: 'Decreasing Trends', value: decreasing, sub: 'Diseases falling >10%', color: '#16A34A' },
+            { label: 'Months Forecasted', value: periods.length, sub: 'Forecast horizon', color: '#7C3AED' },
+          ].map(c => `
+            <div style="background:white;border:1px solid #E5E7EB;border-radius:10px;padding:16px 18px;">
+              <div style="font-size:10px;font-weight:600;color:#9CA3AF;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">${c.label}</div>
+              <div style="font-size:28px;font-weight:800;color:${c.color};line-height:1;">${c.value}</div>
+              <div style="font-size:11px;color:#9CA3AF;margin-top:4px;">${c.sub}</div>
+            </div>
+          `).join('')}
+        </div>
+
+        <!-- Charts Row -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;">
+          <div style="background:white;border:1px solid #E5E7EB;border-radius:10px;padding:18px;">
+            <div style="font-size:12px;font-weight:700;color:#111827;margin-bottom:14px;">📈 Forecast Trend — All Diseases</div>
+            ${lineChart}
+          </div>
+          <div style="background:white;border:1px solid #E5E7EB;border-radius:10px;padding:18px;">
+            <div style="font-size:12px;font-weight:700;color:#111827;margin-bottom:12px;">📊 Disease Burden Distribution</div>
+            ${barChart}
+          </div>
+        </div>
+
+        <!-- Analysis Box -->
+        <div style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:10px;padding:18px;margin-bottom:20px;">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+            <div style="width:3px;height:16px;background:#1D4ED8;border-radius:2px;"></div>
+            <div style="font-size:13px;font-weight:700;color:#1D4ED8;">Analysis — ${brgy}</div>
+          </div>
+          ${analysisPoints.map(pt => `
+            <div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:8px;">
+              <div style="width:5px;height:5px;background:#1D4ED8;border-radius:50%;margin-top:6px;flex-shrink:0;"></div>
+              <div style="font-size:12.5px;color:#1E40AF;line-height:1.6;">${pt}</div>
+            </div>
+          `).join('')}
+        </div>
+
+        <!-- Disease Trend Summary Table -->
+        <div style="background:white;border:1px solid #E5E7EB;border-radius:10px;overflow:hidden;margin-bottom:20px;">
+          <div style="padding:14px 18px;border-bottom:1px solid #F3F4F6;background:#F8FAFC;">
+            <div style="font-size:13px;font-weight:700;color:#111827;">Disease Trend Summary</div>
+          </div>
+          <table style="width:100%;border-collapse:collapse;">
+            <thead>
+              <tr style="background:#F8FAFC;">
+                <th style="padding:9px 12px;text-align:left;font-size:11px;font-weight:600;color:#6B7280;text-transform:uppercase;letter-spacing:0.5px;">Disease</th>
+                <th style="padding:9px 12px;text-align:right;font-size:11px;font-weight:600;color:#6B7280;text-transform:uppercase;letter-spacing:0.5px;">Total Cases</th>
+                <th style="padding:9px 12px;text-align:right;font-size:11px;font-weight:600;color:#6B7280;text-transform:uppercase;letter-spacing:0.5px;">Share %</th>
+                <th style="padding:9px 12px;text-align:center;font-size:11px;font-weight:600;color:#6B7280;text-transform:uppercase;letter-spacing:0.5px;">Trend</th>
+                <th style="padding:9px 12px;text-align:center;font-size:11px;font-weight:600;color:#6B7280;text-transform:uppercase;letter-spacing:0.5px;">Peak Month</th>
+              </tr>
+            </thead>
+            <tbody>${diseaseTrendRows}</tbody>
+          </table>
+        </div>
+
+        <!-- Monthly Data Sheet -->
+        <div style="background:white;border:1px solid #E5E7EB;border-radius:10px;overflow:hidden;margin-bottom:20px;">
+          <div style="padding:14px 18px;border-bottom:1px solid #F3F4F6;background:#F8FAFC;display:flex;align-items:center;justify-content:space-between;">
+            <div style="font-size:13px;font-weight:700;color:#111827;">Monthly Forecast Data Sheet</div>
+            <div style="font-size:11px;color:#6B7280;">Showing top ${colDiseases.length} disease categories</div>
+          </div>
+          <div style="overflow-x:auto;">
+            <table style="width:100%;border-collapse:collapse;min-width:600px;">
+              <thead>
+                <tr style="background:#F8FAFC;">
+                  <th style="padding:9px 12px;text-align:left;font-size:11px;font-weight:600;color:#6B7280;text-transform:uppercase;letter-spacing:0.5px;">Month</th>
+                  <th style="padding:9px 10px;text-align:center;font-size:11px;font-weight:600;color:#6B7280;text-transform:uppercase;letter-spacing:0.5px;">Year</th>
+                  ${headerCols}
+                </tr>
+              </thead>
+              <tbody>
+                ${monthRows}
+                ${totalRow}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    // ── Full HTML Document ──────────────────────────────────────────────────
+    const genDate = new Date().toLocaleDateString('en-PH', { dateStyle: 'long' });
+    const allPeriods = [...new Set(rows.map(r => r.period))].sort();
+    const forecastPeriod = allPeriods.length
+      ? `${formatMonthLabel(allPeriods[0])} ${getPeriodYear(allPeriods[0])} – ${formatMonthLabel(allPeriods[allPeriods.length - 1])} ${getPeriodYear(allPeriods[allPeriods.length - 1])}`
+      : '—';
+
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>PredictHealth — Forecast Report</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: Inter, system-ui, -apple-system, sans-serif;
+      background: #F1F5F9;
+      color: #111827;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    .page { max-width: 960px; margin: 0 auto; padding: 36px 36px 48px; }
+    @media print {
+      body { background: white; }
+      .page { padding: 0; }
+      .no-print { display: none !important; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- Print Button (hidden on print) -->
+<div class="no-print" style="position:fixed;top:18px;right:24px;z-index:999;display:flex;gap:10px;">
+  <button onclick="window.print()" style="background:#1D4ED8;color:white;border:none;padding:10px 20px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;font-family:Inter,sans-serif;box-shadow:0 4px 12px rgba(29,78,216,0.3);">
+    🖨️ Print / Save as PDF
+  </button>
+</div>
+
+<div class="page">
+
+  <!-- ── COVER PAGE ── -->
+  <div style="background:linear-gradient(135deg,#0F172A 0%,#1e3a5f 50%,#1D4ED8 100%);color:white;padding:52px 48px;border-radius:16px;margin-bottom:28px;position:relative;overflow:hidden;">
+    <div style="position:absolute;top:-60px;right:-60px;width:280px;height:280px;background:rgba(255,255,255,0.04);border-radius:50%;"></div>
+    <div style="position:absolute;bottom:-80px;left:-40px;width:220px;height:220px;background:rgba(255,255,255,0.03);border-radius:50%;"></div>
+    <div style="position:relative;">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:32px;">
+        <div style="width:36px;height:36px;background:rgba(255,255,255,0.15);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:18px;">🏥</div>
+        <div style="font-size:13px;font-weight:700;letter-spacing:2px;text-transform:uppercase;opacity:0.8;">PredictHealth</div>
+      </div>
+      <div style="font-size:11px;letter-spacing:3px;text-transform:uppercase;opacity:0.6;margin-bottom:10px;">Barangay Forecast Report</div>
+      <div style="font-size:36px;font-weight:800;letter-spacing:-1px;margin-bottom:6px;line-height:1.1;">Disease Forecast<br/>& Analysis</div>
+      <div style="font-size:15px;opacity:0.7;margin-bottom:32px;">City: ${cityLabel || 'N/A'}</div>
+      <div style="display:grid;grid-template-columns:repeat(3,auto);gap:32px;">
+        <div>
+          <div style="font-size:11px;opacity:0.5;text-transform:uppercase;letter-spacing:1px;margin-bottom:2px;">Generated</div>
+          <div style="font-size:14px;font-weight:600;">${genDate}</div>
+        </div>
+        <div>
+          <div style="font-size:11px;opacity:0.5;text-transform:uppercase;letter-spacing:1px;margin-bottom:2px;">Barangays</div>
+          <div style="font-size:14px;font-weight:600;">${barangayList.join(', ')}</div>
+        </div>
+        <div>
+          <div style="font-size:11px;opacity:0.5;text-transform:uppercase;letter-spacing:1px;margin-bottom:2px;">Forecast Period</div>
+          <div style="font-size:14px;font-weight:600;">${forecastPeriod}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Summary Stats -->
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:28px;">
+    ${[
+      { label: 'Barangays', value: barangayList.length, sub: 'Included in report', icon: '📍', color: '#1D4ED8' },
+      { label: 'Disease Categories', value: diseases.length, sub: 'Tracked', icon: '🦠', color: '#7C3AED' },
+      { label: 'Forecast Months', value: allPeriods.length, sub: 'Period', icon: '📅', color: '#0891B2' },
+      { label: 'Total Predicted Cases', value: cityTotal.toLocaleString(), sub: 'Across all barangays', icon: '📊', color: '#DC2626' },
+    ].map(c => `
+      <div style="background:white;border:1px solid #E5E7EB;border-radius:10px;padding:18px;">
+        <div style="font-size:18px;margin-bottom:6px;">${c.icon}</div>
+        <div style="font-size:26px;font-weight:800;color:${c.color};line-height:1;margin-bottom:4px;">${c.value}</div>
+        <div style="font-size:11px;font-weight:600;color:#111827;margin-bottom:2px;">${c.label}</div>
+        <div style="font-size:10.5px;color:#9CA3AF;">${c.sub}</div>
+      </div>
+    `).join('')}
+  </div>
+
+  <!-- About box -->
+  <div style="background:white;border:1px solid #E5E7EB;border-radius:10px;padding:18px 22px;margin-bottom:28px;">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+      <div style="width:3px;height:16px;background:#1D4ED8;border-radius:2px;"></div>
+      <div style="font-size:13px;font-weight:700;color:#111827;">About This Report</div>
+    </div>
+    ${[
+      `This report covers <strong>${barangayList.length} barangay(s)</strong> and includes forecasted case counts for <strong>${diseases.length} disease categories</strong> over <strong>${allPeriods.length} months</strong>.`,
+      `Each section includes a line chart of predicted trends, a bar chart of disease burden, automated analysis, and a full data table per month.`,
+      `Trend direction is determined by comparing the first and last forecasted month: <strong style="color:#DC2626;">Increasing (&gt;+10%)</strong>, <strong style="color:#6B7280;">Stable (±10%)</strong>, <strong style="color:#16A34A;">Decreasing (&lt;-10%)</strong>.`,
+    ].map(pt => `
+      <div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:7px;">
+        <div style="width:5px;height:5px;background:#1D4ED8;border-radius:50%;margin-top:6px;flex-shrink:0;"></div>
+        <div style="font-size:12.5px;color:#374151;line-height:1.6;">${pt}</div>
+      </div>
+    `).join('')}
+  </div>
+
+  <!-- ══ EXECUTIVE SUMMARY ══ -->
+  <div style="page-break-before:always;"></div>
+
+  <div style="background:linear-gradient(135deg,#1e3a5f 0%,#1D4ED8 100%);color:white;padding:24px 36px;border-radius:12px;margin-bottom:20px;">
+    <div style="font-size:11px;letter-spacing:2px;opacity:0.7;text-transform:uppercase;margin-bottom:4px;">Section 1</div>
+    <div style="font-size:22px;font-weight:800;letter-spacing:-0.5px;">Executive Summary</div>
+    <div style="font-size:13px;opacity:0.7;margin-top:2px;">City-wide Overview Across All Selected Barangays</div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr auto;gap:16px;margin-bottom:20px;">
+    <div style="background:white;border:1px solid #E5E7EB;border-radius:10px;padding:18px;">
+      <div style="font-size:12px;font-weight:700;color:#111827;margin-bottom:14px;">Total Forecast Cases by Disease Category</div>
+      ${cityBarChart}
+    </div>
+    <div style="background:white;border:1px solid #E5E7EB;border-radius:10px;padding:18px;display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:180px;">
+      <div style="font-size:12px;font-weight:700;color:#111827;margin-bottom:12px;">Disease Trends</div>
+      ${cityDonut}
+      <div style="margin-top:12px;display:flex;flex-direction:column;gap:6px;">
+        ${[
+          { color: '#EF4444', label: `Increasing (${cityIncreasing})` },
+          { color: '#94A3B8', label: `Stable (${cityDiseases.filter(d => d.trend === 'Stable').length})` },
+          { color: '#22C55E', label: `Decreasing (${cityDiseases.filter(d => d.trend === 'Decreasing').length})` },
+        ].map(l => `
+          <div style="display:flex;align-items:center;gap:6px;">
+            <div style="width:10px;height:10px;background:${l.color};border-radius:2px;flex-shrink:0;"></div>
+            <div style="font-size:11px;color:#374151;">${l.label}</div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  </div>
+
+  <!-- City-wide table -->
+  <div style="background:white;border:1px solid #E5E7EB;border-radius:10px;overflow:hidden;margin-bottom:20px;">
+    <div style="padding:14px 18px;border-bottom:1px solid #F3F4F6;background:#F8FAFC;">
+      <div style="font-size:13px;font-weight:700;color:#111827;">Disease Burden Summary — All Barangays Combined</div>
+    </div>
+    <table style="width:100%;border-collapse:collapse;">
+      <thead>
+        <tr style="background:#F8FAFC;">
+          <th style="padding:9px 12px;text-align:left;font-size:11px;font-weight:600;color:#6B7280;text-transform:uppercase;letter-spacing:0.5px;">Disease Category</th>
+          <th style="padding:9px 12px;text-align:right;font-size:11px;font-weight:600;color:#6B7280;text-transform:uppercase;letter-spacing:0.5px;">Total Forecast</th>
+          <th style="padding:9px 12px;text-align:right;font-size:11px;font-weight:600;color:#6B7280;text-transform:uppercase;letter-spacing:0.5px;">Share %</th>
+          <th style="padding:9px 12px;text-align:center;font-size:11px;font-weight:600;color:#6B7280;text-transform:uppercase;letter-spacing:0.5px;">Trend</th>
+          <th style="padding:9px 12px;text-align:center;font-size:11px;font-weight:600;color:#6B7280;text-transform:uppercase;letter-spacing:0.5px;">Peak Month</th>
+        </tr>
+      </thead>
+      <tbody>${cityTableRows}</tbody>
+    </table>
+  </div>
+
+  <!-- Executive Insights -->
+  <div style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:10px;padding:18px;margin-bottom:28px;">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+      <div style="width:3px;height:16px;background:#1D4ED8;border-radius:2px;"></div>
+      <div style="font-size:13px;font-weight:700;color:#1D4ED8;">Executive Insights</div>
+    </div>
+    ${[
+      `The most prevalent disease category is <strong>${cityDiseases[0]?.label}</strong> with ${cityDiseases[0]?.total.toLocaleString()} total forecasted cases.`,
+      `<strong>${topBarangay}</strong> has the highest forecasted disease burden with ${barangayData[topBarangay]?.grandTotal.toLocaleString()} total cases.`,
+      `<strong>${cityIncPct}%</strong> of disease-barangay combinations show an increasing trend — these should be prioritized for intervention.`,
+      `A total of <strong>${cityTotal.toLocaleString()} cases</strong> are projected across all ${barangayList.length} barangay(s) during the forecast period.`,
+    ].map(pt => `
+      <div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:8px;">
+        <div style="width:5px;height:5px;background:#1D4ED8;border-radius:50%;margin-top:6px;flex-shrink:0;"></div>
+        <div style="font-size:12.5px;color:#1E40AF;line-height:1.6;">${pt}</div>
+      </div>
+    `).join('')}
+  </div>
+
+  <!-- ══ BARANGAY SECTIONS ══ -->
+  ${barangaySections}
+
+  <!-- Footer -->
+  <div style="margin-top:40px;padding-top:20px;border-top:1px solid #E5E7EB;text-align:center;">
+    <div style="font-size:11px;color:#9CA3AF;">PredictHealth — Barangay Forecast Report · Generated ${genDate}</div>
+  </div>
+
+</div>
+</body>
+</html>`;
+
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `forecast_report_${timestamp}.html`; a.click();
     URL.revokeObjectURL(url);
   }
 };
@@ -1018,19 +1633,20 @@ const ExportMenu = ({ forecastHistory, confirmedBarangays, availableDiseases, ci
             </Typography>
           </Box>
           {[
-            { format: 'csv', label: 'Export as CSV', sub: 'Spreadsheet format' },
-            { format: 'txt', label: 'Export as TXT', sub: 'Formatted report'   },
-          ].map(opt => (
-            <Box key={opt.format} onClick={() => handleExport(opt.format)}
-              sx={{ display: 'flex', alignItems: 'center', gap: 1.25, px: 2, py: 1.25,
-                cursor: 'pointer', '&:hover': { backgroundColor: T.borderSoft } }}>
-              <FileIcon sx={{ fontSize: 14, color: T.textMuted, flexShrink: 0 }} />
-              <Box>
-                <Typography sx={{ fontSize: 12.5, color: T.textBody, fontWeight: 500 }}>{opt.label}</Typography>
-                <Typography sx={{ fontSize: 10.5, color: T.textFaint }}>{opt.sub}</Typography>
-              </Box>
-            </Box>
-          ))}
+  { format: 'pdf', label: 'Export as PDF Report', sub: 'Full report with charts', icon: '📄' },
+  { format: 'csv', label: 'Export as CSV',         sub: 'Spreadsheet format',      icon: '📊' },
+  { format: 'txt', label: 'Export as TXT',         sub: 'Plain text report',       icon: '📝' },
+].map(opt => (
+  <Box key={opt.format} onClick={() => handleExport(opt.format)}
+    sx={{ display: 'flex', alignItems: 'center', gap: 1.25, px: 2, py: 1.25,
+      cursor: 'pointer', '&:hover': { backgroundColor: T.borderSoft } }}>
+    <span style={{ fontSize: 14 }}>{opt.icon}</span>
+    <Box>
+      <Typography sx={{ fontSize: 12.5, color: T.textBody, fontWeight: 500 }}>{opt.label}</Typography>
+      <Typography sx={{ fontSize: 10.5, color: T.textFaint }}>{opt.sub}</Typography>
+    </Box>
+  </Box>
+))}
         </Box>
       )}
     </Box>
