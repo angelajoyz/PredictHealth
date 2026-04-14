@@ -50,7 +50,7 @@ const getAuthHeaders = () => ({
   'Authorization': `Bearer ${localStorage.getItem('token') || ''}`,
 });
 
-const API = 'http://localhost:5000/api';
+const API = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
 const SCard = ({ children, sx = {} }) => (
   <Card sx={{ borderRadius: '10px', backgroundColor: '#FFFFFF',
