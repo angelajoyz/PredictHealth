@@ -996,11 +996,13 @@ const ExportMenu = ({ forecastHistory, confirmedBarangays, availableDiseases, ci
   setOpen(false);
   setExporting(true);
   try {
-    // ── REPLACE the entire `if (format === 'pdf')` block in handleExport with this ──
-
-if (format === 'pdf') {
-  const { jsPDF } = await import('jspdf');
-  await import('jspdf-autotable');
+    if (format === 'pdf') {
+  // Dynamically import docx library (must be installed: npm install docx)
+  const {
+    Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
+    AlignmentType, WidthType, BorderStyle, ShadingType, HeadingLevel,
+    PageBreak, LevelFormat
+  } = await import('docx');
 
   const result = await exportTableData(
     'pdf_data',
@@ -1013,114 +1015,174 @@ if (format === 'pdf') {
 
   const { rows, cityDiseases, cityTotal, barangayList, forecastPeriod, genDate } = result;
 
-  const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
-  const pageW = doc.internal.pageSize.getWidth();
-  const pageH = doc.internal.pageSize.getHeight();
-  const margin = 40;
+  const border = { style: BorderStyle.SINGLE, size: 1, color: 'CCCCCC' };
+  const borders = { top: border, bottom: border, left: border, right: border };
+  const trendArrow = (t) => t === 'Increasing' ? '↑ Increasing' : t === 'Decreasing' ? '↓ Decreasing' : '— Stable';
 
-  // ── Helper: get current Y after last autoTable (or fallback) ──────────────
-  const getY = () => (doc.lastAutoTable ? doc.lastAutoTable.finalY : margin);
+  // Helper: colored text run
+  const colorRun = (text, color, bold = false) =>
+    new TextRun({ text, color: color.replace('#', ''), bold, font: 'Arial', size: 20 });
 
-  // ── Cover block (drawn as a series of autoTable calls so pagination works) ─
-  // We draw cover manually only on the FIRST page; it's short enough to fit.
-  let y = margin;
+  const trendColor = (t) =>
+    t === 'Increasing' ? 'DC2626' : t === 'Decreasing' ? '16A34A' : '6B7280';
 
-  doc.setFillColor(15, 23, 42);
-  doc.roundedRect(margin, y, pageW - margin * 2, 148, 10, 10, 'F');
+  // Helper: section heading paragraph
+  const sectionHeading = (text) =>
+    new Paragraph({
+      children: [new TextRun({ text, bold: true, font: 'Arial', size: 24, color: '111827' })],
+      spacing: { before: 280, after: 120 },
+      border: { bottom: { style: BorderStyle.SINGLE, size: 4, color: '2563EB', space: 1 } },
+    });
 
-  doc.setTextColor(255, 255, 255);
-  doc.setFontSize(8.5);
-  doc.setFont('helvetica', 'bold');
-  doc.text('PREDICTHEALTH — BARANGAY FORECAST REPORT', margin + 16, y + 22);
-
-  doc.setFontSize(20);
-  doc.text('Disease Forecast & Analysis', margin + 16, y + 50);
-
-  doc.setFontSize(10);
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(180, 195, 220);
-  doc.text(`City: ${cityLabel || 'N/A'}`, margin + 16, y + 72);
-  doc.text(`Generated: ${genDate}`, margin + 16, y + 88);
-
-  // Wrap long barangay list
-  const brgyText = `Barangays: ${barangayList.join(', ')}`;
-  const wrappedBrgy = doc.splitTextToSize(brgyText, pageW - margin * 2 - 32);
-  doc.text(wrappedBrgy, margin + 16, y + 104);
-
-  doc.setTextColor(140, 180, 255);
-  doc.text(`Forecast Period: ${forecastPeriod}`, margin + 16, y + 104 + wrappedBrgy.length * 13);
-
-  y += 168;
-
-  // ── Summary Cards ─────────────────────────────────────────────────────────
-  const cards = [
-    { label: 'Total Predicted Cases', value: cityTotal.toLocaleString(), color: [220, 38, 38] },
-    { label: 'Disease Categories',    value: cityDiseases.length,        color: [124, 58, 237] },
-    { label: 'Barangays',             value: barangayList.length,        color: [29, 78, 216] },
-    { label: 'Increasing Trends',
-      value: cityDiseases.filter(d => d.trend === 'Increasing').length,  color: [239, 68, 68] },
-  ];
-
-  const cardW = (pageW - margin * 2 - 12 * 3) / 4;
-  cards.forEach((card, i) => {
-    const cx = margin + i * (cardW + 12);
-    doc.setFillColor(248, 250, 252);
-    doc.setDrawColor(229, 231, 235);
-    doc.roundedRect(cx, y, cardW, 52, 6, 6, 'FD');
-    doc.setTextColor(...card.color);
-    doc.setFontSize(18);
-    doc.setFont('helvetica', 'bold');
-    doc.text(String(card.value), cx + 10, y + 26);
-    doc.setTextColor(107, 114, 128);
-    doc.setFontSize(8);
-    doc.setFont('helvetica', 'normal');
-    doc.text(card.label, cx + 10, y + 42);
+  // Helper: table header cell
+  const hCell = (text, width) => new TableCell({
+    borders,
+    width: { size: width, type: WidthType.DXA },
+    shading: { fill: 'F1F5F9', type: ShadingType.CLEAR },
+    margins: { top: 80, bottom: 80, left: 120, right: 120 },
+    children: [new Paragraph({
+      children: [new TextRun({ text, bold: true, font: 'Arial', size: 18, color: '6B7280' })],
+    })],
   });
 
-  y += 68;
+  // Helper: data cell
+  const dCell = (text, width, options = {}) => new TableCell({
+    borders,
+    width: { size: width, type: WidthType.DXA },
+    margins: { top: 80, bottom: 80, left: 120, right: 120 },
+    children: [new Paragraph({
+      alignment: options.align || AlignmentType.LEFT,
+      children: [new TextRun({
+        text: String(text),
+        font: 'Arial',
+        size: 18,
+        bold: options.bold || false,
+        color: options.color || '374151',
+      })],
+    })],
+  });
 
-  const trendArrow = (t) => t === 'Increasing' ? '↑' : t === 'Decreasing' ? '↓' : '—';
+  const children = [];
+
+  // ── Cover Section ─────────────────────────────────────────────────────────
+  children.push(
+    new Paragraph({
+      children: [new TextRun({ text: 'PREDICTHEALTH — BARANGAY FORECAST REPORT', bold: true, font: 'Arial', size: 18, color: '6B7280', allCaps: true })],
+      spacing: { after: 80 },
+    }),
+    new Paragraph({
+      children: [new TextRun({ text: 'Disease Forecast & Analysis', bold: true, font: 'Arial', size: 48, color: '0F172A' })],
+      spacing: { after: 120 },
+    }),
+    new Paragraph({
+      children: [new TextRun({ text: `City: ${cityLabel || 'N/A'}`, font: 'Arial', size: 22, color: '374151' })],
+      spacing: { after: 60 },
+    }),
+    new Paragraph({
+      children: [new TextRun({ text: `Generated: ${genDate}`, font: 'Arial', size: 20, color: '6B7280' })],
+      spacing: { after: 60 },
+    }),
+    new Paragraph({
+      children: [new TextRun({ text: `Barangays: ${barangayList.join(', ')}`, font: 'Arial', size: 20, color: '6B7280' })],
+      spacing: { after: 60 },
+    }),
+    new Paragraph({
+      children: [new TextRun({ text: `Forecast Period: ${forecastPeriod}`, font: 'Arial', size: 20, color: '2563EB', bold: true })],
+      spacing: { after: 320 },
+    }),
+  );
+
+  // ── Summary Stats ─────────────────────────────────────────────────────────
+  const increasingCount = cityDiseases.filter(d => d.trend === 'Increasing').length;
+  const statsTable = new Table({
+    width: { size: 9360, type: WidthType.DXA },
+    columnWidths: [2340, 2340, 2340, 2340],
+    rows: [
+      new TableRow({
+        children: [
+          new TableCell({
+            borders, width: { size: 2340, type: WidthType.DXA },
+            shading: { fill: 'FEF2F2', type: ShadingType.CLEAR },
+            margins: { top: 120, bottom: 120, left: 160, right: 160 },
+            children: [
+              new Paragraph({ children: [new TextRun({ text: cityTotal.toLocaleString(), bold: true, font: 'Arial', size: 40, color: 'DC2626' })] }),
+              new Paragraph({ children: [new TextRun({ text: 'Total Predicted Cases', font: 'Arial', size: 16, color: '6B7280' })] }),
+            ],
+          }),
+          new TableCell({
+            borders, width: { size: 2340, type: WidthType.DXA },
+            shading: { fill: 'F5F3FF', type: ShadingType.CLEAR },
+            margins: { top: 120, bottom: 120, left: 160, right: 160 },
+            children: [
+              new Paragraph({ children: [new TextRun({ text: String(cityDiseases.length), bold: true, font: 'Arial', size: 40, color: '7C3AED' })] }),
+              new Paragraph({ children: [new TextRun({ text: 'Disease Categories', font: 'Arial', size: 16, color: '6B7280' })] }),
+            ],
+          }),
+          new TableCell({
+            borders, width: { size: 2340, type: WidthType.DXA },
+            shading: { fill: 'EFF6FF', type: ShadingType.CLEAR },
+            margins: { top: 120, bottom: 120, left: 160, right: 160 },
+            children: [
+              new Paragraph({ children: [new TextRun({ text: String(barangayList.length), bold: true, font: 'Arial', size: 40, color: '1D4ED8' })] }),
+              new Paragraph({ children: [new TextRun({ text: 'Barangays', font: 'Arial', size: 16, color: '6B7280' })] }),
+            ],
+          }),
+          new TableCell({
+            borders, width: { size: 2340, type: WidthType.DXA },
+            shading: { fill: 'FEF2F2', type: ShadingType.CLEAR },
+            margins: { top: 120, bottom: 120, left: 160, right: 160 },
+            children: [
+              new Paragraph({ children: [new TextRun({ text: String(increasingCount), bold: true, font: 'Arial', size: 40, color: 'EF4444' })] }),
+              new Paragraph({ children: [new TextRun({ text: 'Increasing Trends', font: 'Arial', size: 16, color: '6B7280' })] }),
+            ],
+          }),
+        ],
+      }),
+    ],
+  });
+
+  children.push(statsTable);
+  children.push(new Paragraph({ spacing: { after: 320 }, children: [] }));
 
   // ── City-wide Disease Summary Table ───────────────────────────────────────
-  doc.setTextColor(17, 24, 39);
-  doc.setFontSize(11);
-  doc.setFont('helvetica', 'bold');
-  doc.text('Disease Burden Summary — All Barangays Combined', margin, y);
-  y += 12;
+  children.push(sectionHeading('Disease Burden Summary — All Barangays Combined'));
 
-  doc.autoTable({
-    startY: y,
-    margin: { left: margin, right: margin },
-    tableWidth: 'auto',
-    head: [['Disease Category', 'Total Forecast', 'Share %', 'Trend', 'Peak Month']],
-    body: cityDiseases.map(d => [
-      d.label,
-      d.total.toLocaleString(),
-      d.share + '%',
-      trendArrow(d.trend) + ' ' + d.trend,
-      d.peakMonth,
-    ]),
-    styles: { fontSize: 9, cellPadding: 6, textColor: [55, 65, 81], overflow: 'linebreak' },
-    headStyles: { fillColor: [248, 250, 252], textColor: [107, 114, 128], fontStyle: 'bold', fontSize: 8 },
-    columnStyles: {
-      0: { cellWidth: 150 },
-      1: { halign: 'right', cellWidth: 85 },
-      2: { halign: 'right', cellWidth: 52 },
-      3: { halign: 'center', cellWidth: 90 },
-      4: { halign: 'center', cellWidth: 90 },
-    },
-    didParseCell: (data) => {
-      if (data.section === 'body' && data.column.index === 3) {
-        const t = cityDiseases[data.row.index]?.trend;
-        data.cell.styles.textColor =
-          t === 'Increasing' ? [220, 38, 38] :
-          t === 'Decreasing' ? [22, 163, 74] : [107, 114, 128];
-      }
-    },
-    alternateRowStyles: { fillColor: [249, 250, 251] },
-    rowPageBreak: 'avoid',    // ← never split a row across pages
-    pageBreak: 'auto',
+  const summaryColWidths = [2800, 1400, 900, 1660, 1600];
+  const summaryTable = new Table({
+    width: { size: 9360, type: WidthType.DXA },
+    columnWidths: summaryColWidths,
+    rows: [
+      new TableRow({
+        tableHeader: true,
+        children: [
+          hCell('Disease Category', summaryColWidths[0]),
+          hCell('Total Forecast', summaryColWidths[1]),
+          hCell('Share %', summaryColWidths[2]),
+          hCell('Trend', summaryColWidths[3]),
+          hCell('Peak Month', summaryColWidths[4]),
+        ],
+      }),
+      ...cityDiseases.map((d, idx) => new TableRow({
+        children: [
+          dCell((idx === 0 ? '★ ' : '') + d.label, summaryColWidths[0], { bold: idx === 0 }),
+          dCell(d.total.toLocaleString(), summaryColWidths[1], { align: AlignmentType.RIGHT, bold: true }),
+          dCell(d.share + '%', summaryColWidths[2], { align: AlignmentType.RIGHT }),
+          new TableCell({
+            borders,
+            width: { size: summaryColWidths[3], type: WidthType.DXA },
+            margins: { top: 80, bottom: 80, left: 120, right: 120 },
+            children: [new Paragraph({
+              alignment: AlignmentType.CENTER,
+              children: [new TextRun({ text: trendArrow(d.trend), font: 'Arial', size: 18, bold: true, color: trendColor(d.trend) })],
+            })],
+          }),
+          dCell(d.peakMonth, summaryColWidths[4], { align: AlignmentType.CENTER }),
+        ],
+      })),
+    ],
   });
+
+  children.push(summaryTable);
 
   // ── Per-Barangay Sections ─────────────────────────────────────────────────
   barangayList.forEach(brgy => {
@@ -1130,146 +1192,181 @@ if (format === 'pdf') {
       ? availableDiseases
       : [...new Set(brgyRows.map(r => r.disease))];
 
-    const diseaseSummary = diseases
-      .map(d => {
-        const dRows = brgyRows.filter(r => r.disease === d);
-        const total = dRows.reduce((s, r) => s + r.predicted, 0);
-        if (total === 0) return null;
-        const info  = { label: dRows[0]?.category || d, color: dRows[0]?.color || '#666' };
-        const trend = dRows[0]?.trend || 'Stable';
-        return { label: info.label, total, trend, share: '0' };
-      })
-      .filter(Boolean);
+    const diseaseSummary = diseases.map(d => {
+      const dRows = brgyRows.filter(r => r.disease === d);
+      const total = dRows.reduce((s, r) => s + r.predicted, 0);
+      if (total === 0) return null;
+      return { label: dRows[0]?.category || d, total, trend: dRows[0]?.trend || 'Stable', share: '0' };
+    }).filter(Boolean);
 
     const grandTotal = diseaseSummary.reduce((s, d) => s + d.total, 0);
-    diseaseSummary.forEach(d => {
-      d.share = grandTotal > 0 ? ((d.total / grandTotal) * 100).toFixed(1) : '0.0';
-    });
+    diseaseSummary.forEach(d => { d.share = grandTotal > 0 ? ((d.total / grandTotal) * 100).toFixed(1) : '0.0'; });
     diseaseSummary.sort((a, b) => b.total - a.total);
 
-    // Barangay header — use autoTable with a single styled row so it page-breaks cleanly
-    doc.autoTable({
-      startY: getY() + 20,
-      margin: { left: margin, right: margin },
-      tableWidth: pageW - margin * 2,
-      head: [],
-      body: [[
-        `${brgy}\n${cityLabel || 'City'} · ${diseaseSummary.length} active diseases · ${periods.length} months · Total: ${grandTotal.toLocaleString()} cases`
-      ]],
-      styles: {
-        fillColor: [29, 78, 216],
-        textColor: [255, 255, 255],
-        fontStyle: 'bold',
-        fontSize: 13,
-        cellPadding: { top: 10, bottom: 10, left: 14, right: 14 },
-        overflow: 'linebreak',
-      },
-      columnStyles: { 0: { cellWidth: pageW - margin * 2 } },
-      rowPageBreak: 'avoid',
-      pageBreak: 'auto',
-    });
+    // Barangay header
+    children.push(new Paragraph({ children: [new PageBreak()] }));
+    children.push(
+      new Paragraph({
+        children: [new TextRun({ text: brgy, bold: true, font: 'Arial', size: 40, color: '1D4ED8' })],
+        spacing: { after: 60 },
+        border: { bottom: { style: BorderStyle.SINGLE, size: 8, color: '1D4ED8', space: 1 } },
+      }),
+      new Paragraph({
+        children: [new TextRun({ text: `${cityLabel || 'City'} · ${diseaseSummary.length} active diseases · ${periods.length} months · Total: ${grandTotal.toLocaleString()} cases`, font: 'Arial', size: 20, color: '6B7280' })],
+        spacing: { after: 280 },
+      }),
+    );
 
-    // Disease trend table
-    doc.setTextColor(17, 24, 39);
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'bold');
-    const y1 = getY() + 14;
-    doc.text('Disease Trend Summary', margin, y1);
+    // Disease trend summary table per barangay
+    children.push(sectionHeading('Disease Trend Summary'));
 
-    doc.autoTable({
-      startY: y1 + 8,
-      margin: { left: margin, right: margin },
-      tableWidth: 'auto',
-      head: [['Disease Category', 'Total Cases', 'Share %', 'Trend']],
-      body: diseaseSummary.map(d => [
-        d.label,
-        d.total.toLocaleString(),
-        d.share + '%',
-        trendArrow(d.trend) + ' ' + d.trend,
-      ]),
-      styles: { fontSize: 9, cellPadding: 5, textColor: [55, 65, 81], overflow: 'linebreak' },
-      headStyles: { fillColor: [248, 250, 252], textColor: [107, 114, 128], fontStyle: 'bold', fontSize: 8 },
-      columnStyles: {
-        0: { cellWidth: 170 },
-        1: { halign: 'right', cellWidth: 85 },
-        2: { halign: 'right', cellWidth: 62 },
-        3: { halign: 'center', cellWidth: 95 },
-      },
-      didParseCell: (data) => {
-        if (data.section === 'body' && data.column.index === 3) {
-          const t = diseaseSummary[data.row.index]?.trend;
-          data.cell.styles.textColor =
-            t === 'Increasing' ? [220, 38, 38] :
-            t === 'Decreasing' ? [22, 163, 74] : [107, 114, 128];
-        }
-      },
-      alternateRowStyles: { fillColor: [249, 250, 251] },
-      rowPageBreak: 'avoid',
-      pageBreak: 'auto',
+    const trendColWidths = [3000, 1600, 900, 1860, 2000];
+    const trendTable = new Table({
+      width: { size: 9360, type: WidthType.DXA },
+      columnWidths: trendColWidths,
+      rows: [
+        new TableRow({
+          tableHeader: true,
+          children: [
+            hCell('Disease Category', trendColWidths[0]),
+            hCell('Total Cases', trendColWidths[1]),
+            hCell('Share %', trendColWidths[2]),
+            hCell('Trend', trendColWidths[3]),
+            hCell('Peak Month', trendColWidths[4] || 2000),
+          ],
+        }),
+        ...diseaseSummary.map((d, idx) => new TableRow({
+          children: [
+            dCell((idx === 0 ? '★ ' : '') + d.label, trendColWidths[0], { bold: idx === 0 }),
+            dCell(d.total.toLocaleString(), trendColWidths[1], { align: AlignmentType.RIGHT, bold: true }),
+            dCell(d.share + '%', trendColWidths[2], { align: AlignmentType.RIGHT }),
+            new TableCell({
+              borders,
+              width: { size: trendColWidths[3], type: WidthType.DXA },
+              margins: { top: 80, bottom: 80, left: 120, right: 120 },
+              children: [new Paragraph({
+                alignment: AlignmentType.CENTER,
+                children: [new TextRun({ text: trendArrow(d.trend), font: 'Arial', size: 18, bold: true, color: trendColor(d.trend) })],
+              })],
+            }),
+            dCell('—', trendColWidths[4] || 2000, { align: AlignmentType.CENTER }),
+          ],
+        })),
+      ],
     });
+    children.push(trendTable);
+    children.push(new Paragraph({ spacing: { after: 280 }, children: [] }));
 
     // Monthly data sheet
-    doc.setTextColor(17, 24, 39);
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'bold');
-    const y2 = getY() + 16;
-    doc.text('Monthly Forecast Data Sheet', margin, y2);
+    children.push(sectionHeading('Monthly Forecast Data Sheet'));
 
     const topDiseases = diseaseSummary.slice(0, 5);
-    const monthRows   = periods.map(period => {
-      const pRows = brgyRows.filter(r => r.period === period);
-      const total  = pRows.reduce((s, r) => s + r.predicted, 0);
-      const cells  = topDiseases.map(d => {
-        const found = pRows.find(r => (r.category || '') === d.label);
-        return (found?.predicted || 0).toLocaleString();
-      });
-      // period format: "2026-01" → Month name + year
-      const [yr, mo] = period.split('-');
-      const monthName = ['January','February','March','April','May','June',
-        'July','August','September','October','November','December'][parseInt(mo,10)-1] || mo;
-      return [monthName, yr, ...cells, total.toLocaleString()];
-    });
+    const numExtraCols = topDiseases.length;
+    const monthW = 900, yearW = 700, totalW = 900;
+    const remainW = 9360 - monthW - yearW - totalW;
+    const diseaseColW = numExtraCols > 0 ? Math.floor(remainW / numExtraCols) : 1400;
+    const colWidths = [monthW, yearW, ...Array(numExtraCols).fill(diseaseColW), totalW];
 
-    const diseaseCols = topDiseases.reduce((acc, d, i) => {
-      acc[i + 2] = { halign: 'right', cellWidth: Math.floor((pageW - margin * 2 - 55 - 34 - 55) / Math.max(topDiseases.length + 1, 1)) };
-      return acc;
-    }, {});
-
-    doc.autoTable({
-      startY: y2 + 8,
-      margin: { left: margin, right: margin },
-      tableWidth: pageW - margin * 2,
-      head: [['Month', 'Year', ...topDiseases.map(d => d.label.slice(0, 11)), 'TOTAL']],
-      body: monthRows,
-      styles: { fontSize: 8, cellPadding: 4, textColor: [55, 65, 81], overflow: 'linebreak' },
-      headStyles: { fillColor: [248, 250, 252], textColor: [107, 114, 128], fontStyle: 'bold', fontSize: 7 },
-      columnStyles: {
-        0: { cellWidth: 55 },
-        1: { cellWidth: 34, halign: 'center' },
-        ...diseaseCols,
-        [topDiseases.length + 2]: { fontStyle: 'bold', halign: 'right', textColor: [17, 24, 39], cellWidth: 50 },
-      },
-      alternateRowStyles: { fillColor: [249, 250, 251] },
-      rowPageBreak: 'avoid',   // ← key: month rows never split mid-row
-      pageBreak: 'auto',
+    const monthlyTable = new Table({
+      width: { size: 9360, type: WidthType.DXA },
+      columnWidths: colWidths,
+      rows: [
+        new TableRow({
+          tableHeader: true,
+          children: [
+            hCell('Month', monthW),
+            hCell('Year', yearW),
+            ...topDiseases.map((d, i) => hCell(d.label.length > 11 ? d.label.slice(0, 11) + '…' : d.label, diseaseColW)),
+            hCell('TOTAL', totalW),
+          ],
+        }),
+        ...periods.map(period => {
+          const pRows = brgyRows.filter(r => r.period === period);
+          const total  = pRows.reduce((s, r) => s + r.predicted, 0);
+          const [yr, mo] = period.split('-');
+          const monthName = ['January','February','March','April','May','June','July','August','September','October','November','December'][parseInt(mo,10)-1] || mo;
+          return new TableRow({
+            children: [
+              dCell(monthName, monthW),
+              dCell(yr, yearW, { align: AlignmentType.CENTER }),
+              ...topDiseases.map(d => {
+                const found = pRows.find(r => r.category === d.label);
+                return dCell((found?.predicted || 0).toLocaleString(), diseaseColW, { align: AlignmentType.RIGHT });
+              }),
+              dCell(total.toLocaleString(), totalW, { align: AlignmentType.RIGHT, bold: true }),
+            ],
+          });
+        }),
+        // Total row
+        new TableRow({
+          children: [
+            new TableCell({
+              borders, width: { size: monthW, type: WidthType.DXA },
+              shading: { fill: 'F1F5F9', type: ShadingType.CLEAR },
+              margins: { top: 80, bottom: 80, left: 120, right: 120 },
+              children: [new Paragraph({ children: [new TextRun({ text: 'TOTAL', bold: true, font: 'Arial', size: 18, color: '111827' })] })],
+            }),
+            new TableCell({
+              borders, width: { size: yearW, type: WidthType.DXA },
+              shading: { fill: 'F1F5F9', type: ShadingType.CLEAR },
+              margins: { top: 80, bottom: 80, left: 120, right: 120 },
+              children: [new Paragraph({ children: [] })],
+            }),
+            ...topDiseases.map(d => {
+              const dTotal = brgyRows.filter(r => r.category === d.label).reduce((s, r) => s + r.predicted, 0);
+              return new TableCell({
+                borders, width: { size: diseaseColW, type: WidthType.DXA },
+                shading: { fill: 'F1F5F9', type: ShadingType.CLEAR },
+                margins: { top: 80, bottom: 80, left: 120, right: 120 },
+                children: [new Paragraph({ alignment: AlignmentType.RIGHT, children: [new TextRun({ text: dTotal.toLocaleString(), bold: true, font: 'Arial', size: 18, color: '111827' })] })],
+              });
+            }),
+            new TableCell({
+              borders, width: { size: totalW, type: WidthType.DXA },
+              shading: { fill: 'F1F5F9', type: ShadingType.CLEAR },
+              margins: { top: 80, bottom: 80, left: 120, right: 120 },
+              children: [new Paragraph({ alignment: AlignmentType.RIGHT, children: [new TextRun({ text: grandTotal.toLocaleString(), bold: true, font: 'Arial', size: 18, color: '1D4ED8' })] })],
+            }),
+          ],
+        }),
+      ],
     });
+    children.push(monthlyTable);
   });
 
-  // ── Footer on every page ──────────────────────────────────────────────────
-  const totalPages = doc.internal.getNumberOfPages();
-  for (let i = 1; i <= totalPages; i++) {
-    doc.setPage(i);
-    doc.setTextColor(156, 163, 175);
-    doc.setFontSize(8);
-    doc.setFont('helvetica', 'normal');
-    doc.text(
-      `PredictHealth — Barangay Forecast Report · Generated ${genDate} · Page ${i} of ${totalPages}`,
-      pageW / 2, pageH - 18,
-      { align: 'center' }
-    );
-  }
+  // ── Footer note ───────────────────────────────────────────────────────────
+  children.push(
+    new Paragraph({ spacing: { before: 480 }, children: [] }),
+    new Paragraph({
+      children: [new TextRun({ text: `PredictHealth — Barangay Forecast Report · Generated ${genDate}`, font: 'Arial', size: 16, color: '9CA3AF', italics: true })],
+      alignment: AlignmentType.CENTER,
+      border: { top: { style: BorderStyle.SINGLE, size: 2, color: 'E5E7EB', space: 1 } },
+    }),
+  );
 
-  doc.save(`forecast_report_${new Date().toISOString().slice(0, 10)}.pdf`);
+  // ── Build & Save ──────────────────────────────────────────────────────────
+  const doc = new Document({
+    styles: {
+      default: { document: { run: { font: 'Arial', size: 20 } } },
+    },
+    sections: [{
+      properties: {
+        page: {
+          size: { width: 12240, height: 15840 },
+          margin: { top: 1080, right: 1080, bottom: 1080, left: 1080 },
+        },
+      },
+      children,
+    }],
+  });
+
+  const blob = await Packer.toBlob(doc);
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = `forecast_report_${new Date().toISOString().slice(0, 10)}.docx`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
     else {
       await exportTableData(format, forecastHistory, confirmedBarangays, availableDiseases, cityLabel);
@@ -1313,7 +1410,7 @@ if (format === 'pdf') {
             </Typography>
           </Box>
           {[
-            { format: 'pdf', label: 'Export as PDF Report', sub: 'Full report with charts & analysis', icon: '📄' },
+            { format: 'pdf', label: 'Export as Word Report (.docx)', sub: 'Full report, properly paginated', icon: '📝' },
             { format: 'csv', label: 'Export as CSV',         sub: 'Spreadsheet format',                 icon: '📊' },
             { format: 'txt', label: 'Export as TXT',         sub: 'Plain text report',                  icon: '📝' },
           ].map(opt => (
