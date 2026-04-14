@@ -1,7 +1,4 @@
 import numpy as np
-from tensorflow.keras.models import Sequential, load_model
-from tensorflow.keras.layers import LSTM, Dense, Dropout
-from tensorflow.keras.callbacks import EarlyStopping
 import os
 
 
@@ -11,6 +8,13 @@ class LSTMForecaster:
         self.n_features      = n_features
         self.n_outputs       = n_outputs
         self.model           = None
+
+    def _get_keras(self):
+        """Lazy load TensorFlow/Keras only when needed."""
+        from tensorflow.keras.models import Sequential, load_model
+        from tensorflow.keras.layers import LSTM, Dense, Dropout
+        from tensorflow.keras.callbacks import EarlyStopping
+        return Sequential, load_model, LSTM, Dense, Dropout, EarlyStopping
 
     def build_model(self):
         """
@@ -24,6 +28,8 @@ class LSTMForecaster:
 
         Speedup: ~2.5× faster per epoch vs original architecture.
         """
+        Sequential, load_model, LSTM, Dense, Dropout, EarlyStopping = self._get_keras()
+
         model = Sequential([
             LSTM(32, activation='relu', return_sequences=True,
                  input_shape=(self.sequence_length, self.n_features)),
@@ -46,11 +52,13 @@ class LSTMForecaster:
           - On short datasets convergence is fast; waiting 15 extra epochs wastes time.
           - restore_best_weights=True ensures quality is not sacrificed.
         """
+        _, _, _, _, _, EarlyStopping = self._get_keras()
+
         early_stop = EarlyStopping(
             monitor='loss',
-            patience=8,              # was 15 — stops much sooner on plateau
+            patience=8,
             restore_best_weights=True,
-            min_delta=1e-4,          # ignore tiny improvements that don't matter
+            min_delta=1e-4,
         )
 
         history = self.model.fit(
@@ -58,7 +66,7 @@ class LSTMForecaster:
             epochs=epochs,
             batch_size=batch_size,
             callbacks=[early_stop],
-            verbose=0,               # was 1 — silence per-epoch logs (speeds up I/O)
+            verbose=0,
         )
 
         actual_epochs = len(history.history['loss'])
@@ -78,7 +86,6 @@ class LSTMForecaster:
             next_pred     = self.model.predict(current_batch, verbose=0)[0]
             predictions.append(next_pred)
 
-            # Target columns are always the LAST n_outputs columns
             next_row = current_sequence[-1].copy()
             next_row[self.n_features - self.n_outputs:] = next_pred
             current_sequence = np.vstack([current_sequence[1:], next_row])
@@ -89,4 +96,5 @@ class LSTMForecaster:
         self.model.save(filepath)
 
     def load_model(self, filepath):
+        _, load_model, _, _, _, _ = self._get_keras()
         self.model = load_model(filepath)
