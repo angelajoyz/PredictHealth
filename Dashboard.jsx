@@ -26,6 +26,7 @@ import {
 } from 'recharts';
 import Sidebar, { T } from './Sidebar';
 
+const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 const ALL_BARANGAYS = '__ALL__';
 
 // ── Forecast months = from Jan to December of the forecast year (based on uploaded data)
@@ -586,9 +587,9 @@ const Dashboard = ({ onNavigate, onLogout }) => {
       try {
         const token = localStorage.getItem('token');
         if (!token) { setCheckingData(false); return; }
-        const res = await fetch('http://localhost:5000/api/dataset-info', {
-          headers: { 'Authorization': `Bearer ${token}` },
-        });
+        const res = await fetch(`${API_BASE_URL}/dataset-info`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
         if (!res.ok) { setCheckingData(false); return; }
         const data = await res.json();
         if (data.barangays?.length > 0) {
@@ -603,9 +604,9 @@ const Dashboard = ({ onNavigate, onLogout }) => {
         if (data.city) localStorage.setItem('datasetCity', data.city);
 
         try {
-          const histRes = await fetch('http://localhost:5000/api/upload-history', {
-            headers: { 'Authorization': `Bearer ${token}` },
-          });
+          const histRes = await fetch(`${API_BASE_URL}/upload-history`, {
+          headers: { 'Authorization': `Bearer ${token}` },
+        });
           if (histRes.ok) {
             const histData = await histRes.json();
             if (Array.isArray(histData) && histData.length > 0) {
@@ -857,7 +858,7 @@ const Dashboard = ({ onNavigate, onLogout }) => {
         const brgy = availableBarangays[i];
         setGenOverlay(prev => ({ ...prev, current: brgy, progress: i }));
         try {
-          const res = await fetch('http://localhost:5000/api/forecast-from-db', {
+          const res = await fetch(`${API_BASE_URL}/forecast-from-db`, {
             method:  'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
             body:    JSON.stringify({ barangay: brgy, diseases: availableDiseases, forecast_months: forecastMonths, city }),
