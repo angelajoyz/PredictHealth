@@ -34,7 +34,13 @@ jwt = JWTManager(app)
 mail = Mail(app)
 
 frontend_url = app.config.get('FRONTEND_URL', 'http://localhost:3000')
-allowed_origins = [frontend_url, "http://localhost:3000", "http://localhost:5173"]
+allowed_origins = [
+    frontend_url,
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "https://predict-health-b2c2nqc6q-angelas-projects-c551cfeb.vercel.app",
+    "https://predict-health.vercel.app",
+]
 CORS(app, origins=list(dict.fromkeys(allowed_origins)), supports_credentials=True)
 
 app.register_blueprint(auth_bp,  url_prefix='/api/auth')
