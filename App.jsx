@@ -71,23 +71,31 @@ function App() {
   });
 
   // Validate token on app load
-  useEffect(() => {
-    if (isAuthenticated) {
-      getCurrentUser().then(() => {
-        // Valid
-      }).catch(() => {
-        // Invalid, logout
-        setIsAuthenticated(false);
-        setCurrentPage("login");
-        localStorage.removeItem("currentPage");
-        localStorage.removeItem("token");
-        localStorage.removeItem("username");
-        localStorage.removeItem("role");
-        localStorage.removeItem("fullName");
-        localStorage.removeItem("email");
+// Palitan ang useEffect sa App.jsx:
+useEffect(() => {
+  if (isAuthenticated) {
+    getCurrentUser()
+      .then(() => {})
+      .catch((err) => {
+        // Logout ONLY sa actual auth errors, hindi sa network/CORS errors
+        const isAuthError =
+          err.message?.includes("Session expired") ||
+          err.message?.includes("Not logged in");
+        
+        if (isAuthError) {
+          setIsAuthenticated(false);
+          setCurrentPage("login");
+          localStorage.removeItem("currentPage");
+          localStorage.removeItem("token");
+          localStorage.removeItem("username");
+          localStorage.removeItem("role");
+          localStorage.removeItem("fullName");
+          localStorage.removeItem("email");
+        }
+        // Network/CORS errors → stay logged in
       });
-    }
-  }, [isAuthenticated]);
+  }
+}, [isAuthenticated]);
 
   const [uploadedFile, setUploadedFile] = useState(null);
   const [uploadedData, setUploadedData] = useState(() => {
