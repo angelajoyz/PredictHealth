@@ -958,11 +958,33 @@ def dataset_info():
         city_val            = rows[0].city or ''
         has_saved_forecasts = Forecast.query.first() is not None
 
+        # Compute dataset_end_date directly from the database
+        from sqlalchemy import func as sqlfunc
+        end_row = db.session.query(
+            sqlfunc.max(BarangayData.year).label('max_year'),
+        ).first()
+        dataset_end_date = None
+        if end_row and end_row.max_year:
+            month_row = db.session.query(
+                sqlfunc.max(BarangayData.month).label('max_month')
+            ).filter(BarangayData.year == end_row.max_year).first()
+            if month_row and month_row.max_month:
+                dataset_end_date = f"{end_row.max_year}-{str(month_row.max_month).zfill(2)}-01"
+
+        # Barangays that already have a saved forecast (from DB, not localStorage)
+        forecasted_barangays = [
+            f.barangay for f in
+            Forecast.query.with_entities(Forecast.barangay).distinct().all()
+            if f.barangay
+        ]
+
         return jsonify({
-            'barangays':           barangays,
-            'disease_columns':     diseases,
-            'city':                city_val,
-            'has_saved_forecasts': has_saved_forecasts,
+            'barangays':            barangays,
+            'disease_columns':      diseases,
+            'city':                 city_val,
+            'has_saved_forecasts':  has_saved_forecasts,
+            'dataset_end_date':     dataset_end_date,
+            'forecasted_barangays': forecasted_barangays,
         }), 200
 
     except Exception as e:
