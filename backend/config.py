@@ -25,7 +25,7 @@ class Config:
     # Database
     SQLALCHEMY_DATABASE_URI = (
         os.environ.get('DATABASE_URL') or
-        "postgresql://postgres.zdckfnxztnfpkvzqxzkg:fYLZR$Mdj-,7X!J@aws-1-ap-south-1.pooler.supabase.com:5432/postgres"
+        "postgresql://postgres.zdckfnxztnfpkvzqxzkg:sILnZwSvnF7b9NSR@aws-1-ap-south-1.pooler.supabase.com:5432/postgres"
     )
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
