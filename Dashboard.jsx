@@ -1304,9 +1304,7 @@ const handleGenerateClick = () => {
                 </Tooltip>
               </Box>
               <Box sx={{ mt: 1.5, px: '2px' }}>
-                {hasNewUpload && hasDbData && !datasetNotReady && (
-                 
-                )}
+               
                 {!hasNewUpload && !hasSavedForecasts && hasDbData && !datasetNotReady && (
                   <Typography sx={{ fontSize: 11.5, color: T.textMuted }}>
                     💡 Click <strong>Generate</strong> to train {forecastMonths}-month forecasts
