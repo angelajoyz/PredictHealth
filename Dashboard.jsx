@@ -1305,15 +1305,7 @@ const handleGenerateClick = () => {
               </Box>
               <Box sx={{ mt: 1.5, px: '2px' }}>
                 {hasNewUpload && hasDbData && !datasetNotReady && (
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75,
-                    px: 1.5, py: 0.9, borderRadius: '7px',
-                    backgroundColor: T.warnBg, border: `1px solid ${T.warnBorder}` }}>
-                    <WarningIcon sx={{ fontSize: 13, color: T.warn, flexShrink: 0 }} />
-                    <Typography sx={{ fontSize: 11.5, color: T.textBody }}>
-                      <strong>New data detected.</strong> Click <strong>Generate</strong> to update forecasts
-                      (January – December {thisMonthDate.getFullYear()}).
-                    </Typography>
-                  </Box>
+                 
                 )}
                 {!hasNewUpload && !hasSavedForecasts && hasDbData && !datasetNotReady && (
                   <Typography sx={{ fontSize: 11.5, color: T.textMuted }}>
