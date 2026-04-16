@@ -833,15 +833,21 @@ const computeTrend = (diseaseEntries) => {
   return t === 'increasing' ? 'Increasing' : t === 'decreasing' ? 'Decreasing' : 'Stable';
 };
 
-const exportTableData = async (format, forecastHistory, selectedBarangays, availableDiseases, cityLabel) => {
+const exportTableData = async (format, forecastHistory, selectedBarangays, availableDiseases, cityLabel, selectedYear, selectedMonth) => {
   if (!forecastHistory?.length || selectedBarangays.size === 0) return;
+
+  const filteredHistory = forecastHistory.filter(h => {
+    if (selectedYear  && getPeriodYear(h.period)  !== selectedYear)  return false;
+    if (selectedMonth && getPeriodMonth(h.period) !== selectedMonth) return false;
+    return true;
+  });
 
   const diseases = availableDiseases.length > 0
     ? availableDiseases
     : [...new Set(forecastHistory.map(h => h.disease))];
 
   const lookup = {};
-  forecastHistory.forEach(h => {
+  filteredHistory.forEach(h => {
     if (!selectedBarangays.has(h.barangay)) return;
     if (!lookup[h.barangay]) lookup[h.barangay] = {};
     if (!lookup[h.barangay][h.period]) lookup[h.barangay][h.period] = {};
@@ -979,7 +985,7 @@ if (format === 'pdf_data') {
 }
 };
 
-const ExportMenu = ({ forecastHistory, confirmedBarangays, availableDiseases, cityLabel }) => {
+const ExportMenu = ({ forecastHistory, confirmedBarangays, availableDiseases, cityLabel, selectedYear, selectedMonth }) => {
   const [open,      setOpen]      = useState(false);
   const [exporting, setExporting] = useState(false);
   const ref = useRef(null);
@@ -996,54 +1002,179 @@ const ExportMenu = ({ forecastHistory, confirmedBarangays, availableDiseases, ci
   setOpen(false);
   setExporting(true);
   try {
-    if (format === 'pdf') {
+// ─────────────────────────────────────────────────────────────────────────────
+// REPLACEMENT: paste this entire block in place of the existing
+//   if (format === 'pdf') { ... }
+// inside the handleExport function in ExportMenu.
+// ─────────────────────────────────────────────────────────────────────────────
+
+if (format === 'pdf') {
   const {
     Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
-    AlignmentType, WidthType, BorderStyle, ShadingType, LevelFormat, PageBreak
+    AlignmentType, WidthType, BorderStyle, ShadingType, LevelFormat, PageBreak,
+    ImageRun,
   } = await import('docx');
- 
+
   const result = await exportTableData(
-    'pdf_data', forecastHistory, confirmedBarangays, availableDiseases, cityLabel
+    'pdf_data', forecastHistory, confirmedBarangays, availableDiseases,
+    cityLabel, selectedYear, selectedMonth
   );
   if (!result) return;
- 
+
   const { rows, cityDiseases, cityTotal, barangayList, forecastPeriod, genDate } = result;
- 
+
   // ── Shared style helpers ──────────────────────────────────────────────────
   const border  = { style: BorderStyle.SINGLE, size: 1, color: 'CCCCCC' };
   const borders = { top: border, bottom: border, left: border, right: border };
- 
+  const noBorder = { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' };
+  const noBorders = { top: noBorder, bottom: noBorder, left: noBorder, right: noBorder };
+
   const trendArrow = (t) =>
     t === 'Increasing' ? '↑ Increasing' : t === 'Decreasing' ? '↓ Decreasing' : '— Stable';
-  const trendHex  = (t) =>
+  const trendHex   = (t) =>
     t === 'Increasing' ? 'DC2626' : t === 'Decreasing' ? '16A34A' : '6B7280';
-  const trendFill = (t) =>
+  const trendFill  = (t) =>
     t === 'Increasing' ? 'FEF2F2' : t === 'Decreasing' ? 'F0FDF4' : 'F9FAFB';
- 
-  // Section heading (blue underline)
-  const sectionHeading = (text) =>
-    new Paragraph({
-      children: [new TextRun({ text, bold: true, font: 'Arial', size: 26, color: '111827' })],
-      spacing: { before: 320, after: 140 },
-      border: { bottom: { style: BorderStyle.SINGLE, size: 4, color: '2563EB', space: 2 } },
+
+  // ── SVG → PNG helper (runs in browser) ───────────────────────────────────
+  const renderLineChart = async (chartData, color) => {
+    if (!chartData || chartData.length === 0) return null;
+    const W = 560, H = 160;
+    const pL = 46, pR = 14, pT = 12, pB = 32;
+    const cW = W - pL - pR, cH = H - pT - pB;
+
+    const vals   = chartData.map(d => d.value ?? 0);
+    const maxVal = Math.max(...vals, 1);
+    const minVal = 0;
+    const range  = maxVal || 1;
+
+    const toX = (i) => pL + (i / Math.max(chartData.length - 1, 1)) * cW;
+    const toY = (v) => pT + cH - (v / range) * cH;
+
+    const gridLines = [0, 0.5, 1].map(t => {
+      const y   = pT + cH * (1 - t);
+      const val = Math.round(t * maxVal);
+      return `<line x1="${pL}" y1="${y}" x2="${pL + cW}" y2="${y}"
+                stroke="#E5E7EB" stroke-width="1" stroke-dasharray="4,3"/>
+              <text x="${pL - 5}" y="${y + 4}" font-size="9" fill="#9CA3AF" text-anchor="end">${val}</text>`;
+    }).join('');
+
+    const step    = Math.max(1, Math.ceil(chartData.length / 7));
+    const xLabels = chartData.map((d, i) => {
+      if (i % step !== 0 && i !== chartData.length - 1) return '';
+      return `<text x="${toX(i)}" y="${pT + cH + 20}" font-size="8" fill="#9CA3AF" text-anchor="middle">${d.label}</text>`;
+    }).join('');
+
+    const pathD = chartData.map((d, i) =>
+      `${i === 0 ? 'M' : 'L'}${toX(i).toFixed(1)},${toY(d.value ?? 0).toFixed(1)}`
+    ).join(' ');
+    const areaD = `${pathD} L${toX(chartData.length - 1).toFixed(1)},${(pT + cH).toFixed(1)} L${pL},${(pT + cH).toFixed(1)} Z`;
+    const dots  = chartData.map((d, i) =>
+      `<circle cx="${toX(i).toFixed(1)}" cy="${toY(d.value ?? 0).toFixed(1)}" r="3.5" fill="${color}" stroke="white" stroke-width="1.5"/>`
+    ).join('');
+
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
+      <rect width="${W}" height="${H}" fill="white"/>
+      ${gridLines}
+      <line x1="${pL}" y1="${pT}" x2="${pL}" y2="${pT + cH}" stroke="#D1D5DB" stroke-width="1"/>
+      <line x1="${pL}" y1="${pT + cH}" x2="${pL + cW}" y2="${pT + cH}" stroke="#D1D5DB" stroke-width="1"/>
+      <defs>
+        <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="${color}" stop-opacity="0.18"/>
+          <stop offset="100%" stop-color="${color}" stop-opacity="0.01"/>
+        </linearGradient>
+      </defs>
+      <path d="${areaD}" fill="url(#g)"/>
+      <path d="${pathD}" fill="none" stroke="${color}" stroke-width="2.2" stroke-dasharray="6,3" stroke-linecap="round" stroke-linejoin="round"/>
+      ${dots}
+      ${xLabels}
+    </svg>`;
+
+    return new Promise((resolve) => {
+      const blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
+      const url  = URL.createObjectURL(blob);
+      const img  = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = W * 2; canvas.height = H * 2;
+        const ctx = canvas.getContext('2d');
+        ctx.scale(2, 2);
+        ctx.fillStyle = 'white'; ctx.fillRect(0, 0, W, H);
+        ctx.drawImage(img, 0, 0, W, H);
+        URL.revokeObjectURL(url);
+        canvas.toBlob(b2 => b2.arrayBuffer().then(buf => resolve(new Uint8Array(buf))), 'image/png');
+      };
+      img.onerror = () => resolve(null);
+      img.src = url;
     });
- 
-  // Disease sub-heading (blue, lighter underline — matches "Respiratory" heading in PDF)
-  const diseaseHeading = (label, icon) =>
-    new Paragraph({
-      children: [new TextRun({ text: `${icon}  ${label}`, bold: true, font: 'Arial', size: 28, color: '1D4ED8' })],
-      spacing: { before: 280, after: 100 },
-      border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: '93C5FD', space: 2 } },
+  };
+
+  const renderBarChart = async (breakdown, color) => {
+    if (!breakdown || breakdown.length === 0) return null;
+    const W = 560, H = 160;
+    const pL = 44, pR = 14, pT = 12, pB = 44;
+    const cW = W - pL - pR, cH = H - pT - pB;
+    const maxVal = Math.max(...breakdown.map(d => d.total), 1);
+    const bGW  = cW / breakdown.length;
+    const barW = Math.min(bGW * 0.32, 18);
+
+    const bars = breakdown.map((d, i) => {
+      const cx = pL + (i + 0.5) * bGW;
+      const mH = (d.male   / maxVal) * cH;
+      const fH = (d.female / maxVal) * cH;
+      return `
+        <rect x="${(cx - barW - 1.5).toFixed(1)}" y="${(pT + cH - mH).toFixed(1)}" width="${barW}" height="${mH.toFixed(1)}" fill="#3B82F6" rx="2"/>
+        <rect x="${(cx + 1.5).toFixed(1)}"         y="${(pT + cH - fH).toFixed(1)}" width="${barW}" height="${fH.toFixed(1)}" fill="#EC4899" rx="2"/>
+        <text x="${cx.toFixed(1)}" y="${pT + cH + 14}" font-size="8" fill="#9CA3AF" text-anchor="middle">${d.age_group}</text>`;
+    }).join('');
+
+    const yLines = [0, 0.5, 1].map(t => {
+      const y = pT + cH * (1 - t);
+      return `<line x1="${pL}" y1="${y.toFixed(1)}" x2="${pL + cW}" y2="${y.toFixed(1)}"
+                stroke="#E5E7EB" stroke-width="1" stroke-dasharray="4,3"/>
+              <text x="${pL - 5}" y="${(y + 4).toFixed(1)}" font-size="9" fill="#9CA3AF" text-anchor="end">${Math.round(t * maxVal)}</text>`;
+    }).join('');
+
+    const legendY = pT + cH + 30;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
+      <rect width="${W}" height="${H}" fill="white"/>
+      ${yLines}
+      <line x1="${pL}" y1="${pT}" x2="${pL}" y2="${pT + cH}" stroke="#D1D5DB" stroke-width="1"/>
+      <line x1="${pL}" y1="${pT + cH}" x2="${pL + cW}" y2="${pT + cH}" stroke="#D1D5DB" stroke-width="1"/>
+      ${bars}
+      <rect x="${pL}" y="${legendY}" width="10" height="10" fill="#3B82F6" rx="2"/>
+      <text x="${pL + 14}" y="${legendY + 9}" font-size="10" fill="#374151">Male</text>
+      <rect x="${pL + 60}" y="${legendY}" width="10" height="10" fill="#EC4899" rx="2"/>
+      <text x="${pL + 74}" y="${legendY + 9}" font-size="10" fill="#374151">Female</text>
+    </svg>`;
+
+    return new Promise((resolve) => {
+      const blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
+      const url  = URL.createObjectURL(blob);
+      const img  = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = W * 2; canvas.height = H * 2;
+        const ctx = canvas.getContext('2d');
+        ctx.scale(2, 2);
+        ctx.fillStyle = 'white'; ctx.fillRect(0, 0, W, H);
+        ctx.drawImage(img, 0, 0, W, H);
+        URL.revokeObjectURL(url);
+        canvas.toBlob(b2 => b2.arrayBuffer().then(buf => resolve(new Uint8Array(buf))), 'image/png');
+      };
+      img.onerror = () => resolve(null);
+      img.src = url;
     });
- 
-  // Table helpers
+  };
+
+  // ── Cell helpers ──────────────────────────────────────────────────────────
   const hCell = (text, width) => new TableCell({
     borders, width: { size: width, type: WidthType.DXA },
     shading: { fill: 'F1F5F9', type: ShadingType.CLEAR },
     margins: { top: 80, bottom: 80, left: 120, right: 120 },
     children: [new Paragraph({ children: [new TextRun({ text, bold: true, font: 'Arial', size: 18, color: '6B7280' })] })],
   });
- 
+
   const dCell = (text, width, opts = {}) => new TableCell({
     borders, width: { size: width, type: WidthType.DXA },
     shading: opts.fill ? { fill: opts.fill, type: ShadingType.CLEAR } : undefined,
@@ -1053,7 +1184,7 @@ const ExportMenu = ({ forecastHistory, confirmedBarangays, availableDiseases, ci
       children: [new TextRun({ text: String(text), font: 'Arial', size: 18, bold: opts.bold || false, color: opts.color || '374151' })],
     })],
   });
- 
+
   const trendCell = (trend, width) => new TableCell({
     borders, width: { size: width, type: WidthType.DXA },
     shading: { fill: trendFill(trend), type: ShadingType.CLEAR },
@@ -1063,7 +1194,7 @@ const ExportMenu = ({ forecastHistory, confirmedBarangays, availableDiseases, ci
       children: [new TextRun({ text: trendArrow(trend), font: 'Arial', size: 18, bold: true, color: trendHex(trend) })],
     })],
   });
- 
+
   const statCell = (value, label, valueFill, valueColor, cellWidth) => new TableCell({
     borders, width: { size: cellWidth, type: WidthType.DXA },
     shading: { fill: valueFill, type: ShadingType.CLEAR },
@@ -1073,8 +1204,19 @@ const ExportMenu = ({ forecastHistory, confirmedBarangays, availableDiseases, ci
       new Paragraph({ children: [new TextRun({ text: label, font: 'Arial', size: 16, color: '6B7280' })] }),
     ],
   });
- 
-  // Analysis callout box (light blue fill, thick left blue border — matches PDF style)
+
+  const sectionHeading = (text) => new Paragraph({
+    children: [new TextRun({ text, bold: true, font: 'Arial', size: 26, color: '111827' })],
+    spacing: { before: 320, after: 140 },
+    border: { bottom: { style: BorderStyle.SINGLE, size: 4, color: '2563EB', space: 2 } },
+  });
+
+  const diseaseHeading = (label, icon, color) => new Paragraph({
+    children: [new TextRun({ text: `${icon}  ${label}`, bold: true, font: 'Arial', size: 28, color: color?.replace('#', '') || '1D4ED8' })],
+    spacing: { before: 280, after: 100 },
+    border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: '93C5FD', space: 2 } },
+  });
+
   const analysisBox = (title, items) => new Table({
     width: { size: 9360, type: WidthType.DXA },
     columnWidths: [9360],
@@ -1093,22 +1235,50 @@ const ExportMenu = ({ forecastHistory, confirmedBarangays, availableDiseases, ci
           children: [new TextRun({ text: `📋  ${title}`, bold: true, font: 'Arial', size: 20, color: '1D4ED8' })],
           spacing: { after: 100 },
         }),
-        ...items.map(item =>
-          new Paragraph({
-            children: [new TextRun({ text: `*  ${item}`, font: 'Arial', size: 19, color: '374151' })],
-            spacing: { after: 60 },
-            indent: { left: 200 },
-          })
-        ),
+        ...items.map(item => new Paragraph({
+          children: [new TextRun({ text: `*  ${item}`, font: 'Arial', size: 19, color: '374151' })],
+          spacing: { after: 60 },
+          indent: { left: 200 },
+        })),
       ],
     })]})],
   });
- 
+
+  // ── Chart label helper ────────────────────────────────────────────────────
+  const chartLabelBox = (label, color) => new Table({
+    width: { size: 9360, type: WidthType.DXA },
+    columnWidths: [9360],
+    rows: [new TableRow({ children: [new TableCell({
+      borders: noBorders,
+      width: { size: 9360, type: WidthType.DXA },
+      shading: { fill: 'F8FAFC', type: ShadingType.CLEAR },
+      margins: { top: 80, bottom: 80, left: 160, right: 160 },
+      children: [new Paragraph({
+        children: [
+          new TextRun({ text: '— — ', font: 'Arial', size: 18, color: color?.replace('#', '') || '2563EB' }),
+          new TextRun({ text: ' Predicted (dashed line)', font: 'Arial', size: 18, color: '6B7280' }),
+        ],
+      })],
+    })]})],
+  });
+
+  // Helper: image paragraph
+  const imageParagraph = (bytes, widthEmu, heightEmu, label) => {
+    if (!bytes) return new Paragraph({
+      children: [new TextRun({ text: `[${label} chart unavailable]`, font: 'Arial', size: 18, color: '9CA3AF', italics: true })],
+      spacing: { after: 80 },
+    });
+    return new Paragraph({
+      children: [new ImageRun({ data: bytes, transformation: { width: Math.round(widthEmu / 9144), height: Math.round(heightEmu / 9144) }, type: 'png' })],
+      spacing: { after: 80 },
+    });
+  };
+
   // ── Build document ────────────────────────────────────────────────────────
   const children = [];
   const increasingCount = cityDiseases.filter(d => d.trend === 'Increasing').length;
- 
-  // Cover
+
+  // Cover page
   children.push(
     new Paragraph({ children: [new TextRun({ text: 'PREDICTHEALTH — BARANGAY FORECAST REPORT', bold: true, font: 'Arial', size: 18, color: '6B7280', allCaps: true })], spacing: { after: 80 } }),
     new Paragraph({ children: [new TextRun({ text: 'Disease Forecast & Analysis', bold: true, font: 'Arial', size: 52, color: '0F172A' })], spacing: { after: 140 } }),
@@ -1117,22 +1287,22 @@ const ExportMenu = ({ forecastHistory, confirmedBarangays, availableDiseases, ci
     new Paragraph({ children: [new TextRun({ text: `Barangays: ${barangayList.join(', ')}`, font: 'Arial', size: 20, color: '6B7280' })], spacing: { after: 60 } }),
     new Paragraph({ children: [new TextRun({ text: `Forecast Period: ${forecastPeriod}`, font: 'Arial', size: 20, color: '2563EB', bold: true })], spacing: { after: 360 } }),
   );
- 
-  // Summary stat grid (4 boxes)
+
+  // Summary stat grid
   const W4 = Math.floor(9360 / 4);
   children.push(new Table({
     width: { size: 9360, type: WidthType.DXA },
     columnWidths: [W4, W4, W4, 9360 - W4 * 3],
     rows: [new TableRow({ children: [
       statCell(cityTotal.toLocaleString(), 'Total Predicted Cases', 'FEF2F2', 'DC2626', W4),
-      statCell(String(cityDiseases.length), 'Disease Categories', 'F5F3FF', '7C3AED', W4),
-      statCell(String(barangayList.length), 'Barangays', 'EFF6FF', '1D4ED8', W4),
-      statCell(String(increasingCount), 'Increasing Trends', 'FEF2F2', 'EF4444', 9360 - W4 * 3),
+      statCell(String(cityDiseases.length), 'Disease Categories',   'F5F3FF', '7C3AED', W4),
+      statCell(String(barangayList.length), 'Barangays',            'EFF6FF', '1D4ED8', W4),
+      statCell(String(increasingCount),     'Increasing Trends',    'FEF2F2', 'EF4444', 9360 - W4 * 3),
     ]})],
   }));
   children.push(new Paragraph({ spacing: { after: 320 }, children: [] }));
- 
-  // City-wide Disease Burden Summary table
+
+  // City-wide burden table
   children.push(sectionHeading('Disease Burden Summary — All Barangays Combined'));
   const sCols = [2800, 1400, 900, 1660, 1600];
   children.push(new Table({
@@ -1149,28 +1319,31 @@ const ExportMenu = ({ forecastHistory, confirmedBarangays, availableDiseases, ci
       ]})),
     ],
   }));
- 
-  // ── Per-Barangay Sections ─────────────────────────────────────────────────
-  barangayList.forEach(brgy => {
+
+  // ── Per-barangay sections ─────────────────────────────────────────────────
+  for (const brgy of barangayList) {
     const brgyRows = rows.filter(r => r.barangay === brgy);
-    const diseases  = availableDiseases.length > 0
+    const diseases = availableDiseases.length > 0
       ? availableDiseases
       : [...new Set(brgyRows.map(r => r.disease))];
     const allPeriods = [...new Set(brgyRows.map(r => r.period))].sort();
- 
+
     // Build per-barangay disease summary
     const diseaseSummary = diseases.map(d => {
       const dRows = brgyRows.filter(r => r.disease === d);
       const total = dRows.reduce((s, r) => s + r.predicted, 0);
       if (total === 0) return null;
       const info = getDiseaseInfo(d);
-      return { disease: d, label: dRows[0]?.category || d, icon: info.icon || '🏥', total, trend: dRows[0]?.trend || 'Stable' };
+      return { disease: d, label: dRows[0]?.category || d, icon: info.icon || '🏥', color: info.color || '#2563EB', total, trend: dRows[0]?.trend || 'Stable' };
     }).filter(Boolean);
+
     const grandTotal = diseaseSummary.reduce((s, d) => s + d.total, 0);
-    diseaseSummary.forEach(d => { d.share = grandTotal > 0 ? ((d.total / grandTotal) * 100).toFixed(1) : '0.0'; });
+    diseaseSummary.forEach(d => {
+      d.share = grandTotal > 0 ? ((d.total / grandTotal) * 100).toFixed(1) : '0.0';
+    });
     diseaseSummary.sort((a, b) => b.total - a.total);
- 
-    // Barangay page break + header
+
+    // Page break + barangay header
     children.push(new Paragraph({ children: [new PageBreak()] }));
     children.push(
       new Paragraph({
@@ -1179,54 +1352,182 @@ const ExportMenu = ({ forecastHistory, confirmedBarangays, availableDiseases, ci
         border: { bottom: { style: BorderStyle.SINGLE, size: 8, color: '1D4ED8', space: 2 } },
       }),
       new Paragraph({
-        children: [new TextRun({ text: `${cityLabel || 'City'} · ${diseaseSummary.length} active diseases · ${allPeriods.length} months · Total: ${grandTotal.toLocaleString()} cases`, font: 'Arial', size: 20, color: '6B7280' })],
+        children: [new TextRun({
+          text: `${cityLabel || 'City'} · ${diseaseSummary.length} active diseases · ${allPeriods.length} months · Total: ${grandTotal.toLocaleString()} cases`,
+          font: 'Arial', size: 20, color: '6B7280',
+        })],
         spacing: { after: 300 },
       }),
     );
- 
+
     children.push(sectionHeading('Disease Summary'));
- 
-    // ── Per-disease detail blocks ───────────────────────────────────────────
-    diseaseSummary.forEach(d => {
+
+    // ── Per-disease detail blocks ─────────────────────────────────────────
+    for (const d of diseaseSummary) {
       const dRows    = brgyRows.filter(r => r.disease === d.disease);
       const dPeriods = allPeriods.map(p => ({
-        period:    p,
-        predicted: dRows.find(r => r.period === p)?.predicted ?? 0,
+        period: p,
+        label:  (() => {
+          const m = p.match(/^\d{4}-(\d{2})/);
+          const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+          return m ? months[parseInt(m[1], 10) - 1] : p;
+        })(),
+        value: dRows.find(r => r.period === p)?.predicted ?? 0,
       }));
-      const peakEntry = [...dPeriods].sort((a, b) => b.predicted - a.predicted)[0];
+
+      const peakEntry = [...dPeriods].sort((a, b) => b.value - a.value)[0];
       const peakLabel = peakEntry
-        ? `${formatMonthLabel(peakEntry.period)} ${getPeriodYear(peakEntry.period)} (${peakEntry.predicted} cases)`
+        ? `${peakEntry.label} ${peakEntry.period?.slice(0, 4)} (${peakEntry.value} cases)`
         : '—';
-      const firstVal  = dPeriods[0]?.predicted ?? 0;
-      const lastVal   = dPeriods[dPeriods.length - 1]?.predicted ?? 0;
+      const firstVal  = dPeriods[0]?.value ?? 0;
+      const lastVal   = dPeriods[dPeriods.length - 1]?.value ?? 0;
       const pctChange = firstVal > 0
         ? (((lastVal - firstVal) / firstVal) * 100).toFixed(1)
         : lastVal > 0 ? '+∞' : '0';
-      const maxVal = Math.max(...dPeriods.map(x => x.predicted));
- 
+      const maxVal = Math.max(...dPeriods.map(x => x.value));
+      const hexColor = d.color?.replace('#', '') || '2563EB';
+
       // Disease heading
-      children.push(diseaseHeading(d.label, d.icon));
- 
-      // Forecast table — 7-column layout: label col + 6 month cols, split into two halves
+      children.push(diseaseHeading(d.label, d.icon, d.color));
+
+      // ── FORECAST LINE CHART ──────────────────────────────────────────────
+      const forecastChartBytes = await renderLineChart(dPeriods, d.color || '#2563EB');
+      // Chart image — 560px wide → in EMU: 560 * 9144 = 5,120,640; height 160*9144=1,463,040
+      const chartImgW = 5120640, chartImgH = 1463040;
+
+      children.push(
+        new Paragraph({
+          children: [new TextRun({ text: 'Forecast (Monthly Predicted Cases)', bold: true, font: 'Arial', size: 20, color: '374151' })],
+          spacing: { before: 120, after: 80 },
+        }),
+      );
+
+      if (forecastChartBytes) {
+        children.push(new Paragraph({
+          children: [new ImageRun({ data: forecastChartBytes, transformation: { width: 560, height: 160 }, type: 'png' })],
+          spacing: { after: 60 },
+        }));
+      } else {
+        children.push(new Paragraph({
+          children: [new TextRun({ text: '[Forecast chart unavailable]', font: 'Arial', size: 18, color: '9CA3AF', italics: true })],
+          spacing: { after: 60 },
+        }));
+      }
+
+      // Chart legend
+      children.push(new Paragraph({
+        children: [
+          new TextRun({ text: '--- ', font: 'Arial', size: 18, color: hexColor }),
+          new TextRun({ text: 'Predicted Cases (dashed)', font: 'Arial', size: 18, color: '6B7280' }),
+          new TextRun({ text: '     ', font: 'Arial', size: 18 }),
+          new TextRun({ text: `Trend: ${trendArrow(d.trend)}`, bold: true, font: 'Arial', size: 18, color: trendHex(d.trend) }),
+        ],
+        spacing: { after: 200 },
+      }));
+
+      // ── AGE/SEX BREAKDOWN CHART ──────────────────────────────────────────
+      // Fetch real age/sex breakdown from the API
+      let ageSexBytes = null;
+      let ageSexSummary = null;
+      try {
+        const catKey  = d.disease.replace('_cases', '');
+        const city    = localStorage.getItem('datasetCity') || '';
+        const asData  = await getAgeSexBreakdown(catKey, brgy, city);
+        if (asData && asData.total_cases > 0) {
+          const filtered = (asData.breakdown || []).filter(x => x.total > 0);
+          ageSexBytes = await renderBarChart(filtered, d.color || '#2563EB');
+          const peak  = filtered.reduce((a, b) => b.total > a.total ? b : a, filtered[0] || {});
+          ageSexSummary = {
+            totalMale:   asData.total_male,
+            totalFemale: asData.total_female,
+            total:       asData.total_cases,
+            peak,
+          };
+        }
+      } catch (e) {
+        console.warn('Age/sex breakdown failed for', d.disease, e);
+      }
+
+      children.push(new Paragraph({
+        children: [new TextRun({ text: 'Age & Sex Breakdown', bold: true, font: 'Arial', size: 20, color: '374151' })],
+        spacing: { before: 80, after: 80 },
+      }));
+
+      if (ageSexBytes) {
+        // Male/Female summary chips
+        const malePct   = ageSexSummary.total > 0 ? Math.round((ageSexSummary.totalMale   / ageSexSummary.total) * 100) : 0;
+        const femalePct = ageSexSummary.total > 0 ? Math.round((ageSexSummary.totalFemale / ageSexSummary.total) * 100) : 0;
+
+        // Small summary row
+        const chipCW = 3120;
+        children.push(new Table({
+          width: { size: 9360, type: WidthType.DXA },
+          columnWidths: [chipCW, chipCW, 9360 - chipCW * 2],
+          rows: [new TableRow({ children: [
+            new TableCell({
+              borders: noBorders, width: { size: chipCW, type: WidthType.DXA },
+              shading: { fill: 'EFF6FF', type: ShadingType.CLEAR },
+              margins: { top: 80, bottom: 80, left: 140, right: 140 },
+              children: [new Paragraph({ children: [new TextRun({ text: `♂ Male: ${ageSexSummary.totalMale.toLocaleString()} (${malePct}%)`, font: 'Arial', size: 19, bold: true, color: '1D4ED8' })] })],
+            }),
+            new TableCell({
+              borders: noBorders, width: { size: chipCW, type: WidthType.DXA },
+              shading: { fill: 'FDF2F8', type: ShadingType.CLEAR },
+              margins: { top: 80, bottom: 80, left: 140, right: 140 },
+              children: [new Paragraph({ children: [new TextRun({ text: `♀ Female: ${ageSexSummary.totalFemale.toLocaleString()} (${femalePct}%)`, font: 'Arial', size: 19, bold: true, color: 'BE185D' })] })],
+            }),
+            new TableCell({
+              borders: noBorders, width: { size: 9360 - chipCW * 2, type: WidthType.DXA },
+              shading: { fill: hexColor, type: ShadingType.CLEAR },
+              margins: { top: 80, bottom: 80, left: 140, right: 140 },
+              children: [new Paragraph({ children: [new TextRun({ text: ageSexSummary.peak ? `Peak: Age ${ageSexSummary.peak.age_group} (${ageSexSummary.peak.total.toLocaleString()} cases)` : '', font: 'Arial', size: 19, bold: true, color: hexColor })] })],
+            }),
+          ]})],
+        }));
+        children.push(new Paragraph({ spacing: { after: 80 }, children: [] }));
+
+        // Chart image
+        children.push(new Paragraph({
+          children: [new ImageRun({ data: ageSexBytes, transformation: { width: 560, height: 160 }, type: 'png' })],
+          spacing: { after: 80 },
+        }));
+
+        if (ageSexSummary.peak) {
+          children.push(new Paragraph({
+            children: [new TextRun({
+              text: `Age group ${ageSexSummary.peak.age_group} has the highest ${d.label} cases with ${ageSexSummary.peak.total.toLocaleString()} cases (${ageSexSummary.peak.male.toLocaleString()} male, ${ageSexSummary.peak.female.toLocaleString()} female).`,
+              font: 'Arial', size: 18, color: '374151',
+            })],
+            spacing: { after: 100 },
+          }));
+        }
+      } else {
+        children.push(new Paragraph({
+          children: [new TextRun({ text: 'No age/sex breakdown data available for this disease.', font: 'Arial', size: 18, color: '9CA3AF', italics: true })],
+          spacing: { after: 80 },
+        }));
+      }
+
+      // ── Monthly forecast table ─────────────────────────────────────────
       const fCols = [1440, ...Array(6).fill(Math.floor((9360 - 1440) / 6))];
       const halves = [dPeriods.slice(0, 6), dPeriods.slice(6)];
       halves.forEach((half, hi) => {
         if (half.length === 0) return;
-        const pad = Array(6 - half.length).fill({ period: '', predicted: null });
+        const pad = Array(6 - half.length).fill({ period: '', label: '', value: null });
         children.push(new Table({
           width: { size: 9360, type: WidthType.DXA },
           columnWidths: fCols,
           rows: [
             new TableRow({ children: [
               hCell(hi === 0 ? 'Forecast' : '', fCols[0]),
-              ...[...half, ...pad].map((p, i) => hCell(p.period ? formatMonthLabel(p.period) : '', fCols[i + 1])),
+              ...[...half, ...pad].map((p, i) => hCell(p.label || '', fCols[i + 1])),
             ]}),
             new TableRow({ children: [
               dCell('Predicted', fCols[0], { bold: true, color: '1D4ED8' }),
               ...[...half, ...pad].map((p, i) => {
-                if (p.predicted === null) return dCell('', fCols[i + 1]);
-                const isMax = p.predicted === maxVal && maxVal > 0;
-                return dCell(p.predicted.toLocaleString(), fCols[i + 1], {
+                if (p.value === null) return dCell('', fCols[i + 1]);
+                const isMax = p.value === maxVal && maxVal > 0;
+                return dCell(p.value.toLocaleString(), fCols[i + 1], {
                   align: AlignmentType.CENTER,
                   bold: isMax,
                   fill: isMax ? 'DBEAFE' : undefined,
@@ -1238,8 +1539,8 @@ const ExportMenu = ({ forecastHistory, confirmedBarangays, availableDiseases, ci
         }));
         children.push(new Paragraph({ spacing: { after: 80 }, children: [] }));
       });
- 
-      // Trend + peak summary line
+
+      // Trend + peak summary
       children.push(new Paragraph({
         children: [
           new TextRun({ text: 'Trend: ', bold: true, font: 'Arial', size: 20, color: '374151' }),
@@ -1248,25 +1549,25 @@ const ExportMenu = ({ forecastHistory, confirmedBarangays, availableDiseases, ci
         ],
         spacing: { after: 120 },
       }));
- 
-      // Analysis callout box
+
+      // Analysis callout
       children.push(analysisBox(`Analysis — ${d.label}`, [
         `${d.label} accounts for ${d.share}% of total forecasted cases (${d.total.toLocaleString()} cases).`,
         `Forecast trend is ${d.trend} — peak cases projected in ${peakLabel}.`,
         `Overall change from first to last forecast month: ${pctChange}%.`,
       ]));
-      children.push(new Paragraph({ spacing: { after: 240 }, children: [] }));
-    });
- 
-    // ── Monthly Forecast Data Sheet ─────────────────────────────────────────
+      children.push(new Paragraph({ spacing: { after: 280 }, children: [] }));
+    } // end per-disease loop
+
+    // ── Monthly Forecast Data Sheet ──────────────────────────────────────
     children.push(new Paragraph({ children: [new PageBreak()] }));
     children.push(sectionHeading('Monthly Forecast Data Sheet'));
- 
-    const topD  = diseaseSummary.slice(0, 5);
+
+    const topD = diseaseSummary.slice(0, 5);
     const mW = 900, yW = 700, tW = 1000;
-    const dCW   = topD.length > 0 ? Math.floor((9360 - mW - yW - tW) / topD.length) : 1400;
+    const dCW = topD.length > 0 ? Math.floor((9360 - mW - yW - tW) / topD.length) : 1400;
     const mCols = [mW, yW, ...Array(topD.length).fill(dCW), tW];
- 
+
     children.push(new Table({
       width: { size: 9360, type: WidthType.DXA },
       columnWidths: mCols,
@@ -1278,9 +1579,10 @@ const ExportMenu = ({ forecastHistory, confirmedBarangays, availableDiseases, ci
         ]}),
         ...allPeriods.map(period => {
           const pRows = brgyRows.filter(r => r.period === period);
-          const total  = pRows.reduce((s, r) => s + r.predicted, 0);
+          const total = pRows.reduce((s, r) => s + r.predicted, 0);
           const [yr, mo] = period.split('-');
-          const mName = ['January','February','March','April','May','June','July','August','September','October','November','December'][parseInt(mo, 10) - 1] || mo;
+          const MONTH_NAMES_FULL = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+          const mName = MONTH_NAMES_FULL[parseInt(mo, 10) - 1] || mo;
           return new TableRow({ children: [
             dCell(mName, mW),
             dCell(yr, yW, { align: AlignmentType.CENTER }),
@@ -1303,31 +1605,31 @@ const ExportMenu = ({ forecastHistory, confirmedBarangays, availableDiseases, ci
         ]}),
       ],
     }));
- 
-    // Overall Analysis box
+
+    // Overall analysis box
     children.push(new Paragraph({ spacing: { after: 240 }, children: [] }));
     const peakPeriodEntry = allPeriods.map(p => ({
       p,
       total: diseases.reduce((s, d) => s + (brgyRows.find(r => r.period === p && r.disease === d)?.predicted ?? 0), 0),
     })).sort((a, b) => b.total - a.total)[0];
-    const peakPeriodLabel = peakPeriodEntry
-      ? `${formatMonthLabel(peakPeriodEntry.p)} ${getPeriodYear(peakPeriodEntry.p)} with ${peakPeriodEntry.total} total cases`
-      : '—';
+    const MONTH_NAMES_FULL2 = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+    const fmtPeriod = (p) => { const [yr, mo] = (p || '').split('-'); return `${MONTH_NAMES_FULL2[parseInt(mo, 10) - 1] || mo} ${yr}`; };
+    const peakPeriodLabel = peakPeriodEntry ? `${fmtPeriod(peakPeriodEntry.p)} with ${peakPeriodEntry.total} total cases` : '—';
     const firstTotal = diseases.reduce((s, d) => s + (brgyRows.find(r => r.period === allPeriods[0] && r.disease === d)?.predicted ?? 0), 0);
     const lastTotal  = diseases.reduce((s, d) => s + (brgyRows.find(r => r.period === allPeriods[allPeriods.length - 1] && r.disease === d)?.predicted ?? 0), 0);
     const overallPct = firstTotal > 0 ? (((lastTotal - firstTotal) / firstTotal) * 100).toFixed(1) : '—';
     const increasingDiseases = diseaseSummary.filter(d => d.trend === 'Increasing').map(d => d.label);
- 
+
     children.push(analysisBox(`Overall Analysis — ${brgy}`, [
       `${diseaseSummary[0]?.label || 'N/A'} is the leading disease category with ${diseaseSummary[0]?.total.toLocaleString() || 0} cases (${diseaseSummary[0]?.share || 0}% of total).`,
       increasingDiseases.length > 0
         ? `${increasingDiseases.join(', ')} show an increasing trend — requiring priority intervention.`
         : 'No disease categories show an increasing trend.',
       `Peak disease burden projected for ${peakPeriodLabel}.`,
-      `Overall forecast will ${parseFloat(overallPct) > 0 ? 'increase' : parseFloat(overallPct) < 0 ? 'decrease' : 'remain stable'} by ${Math.abs(parseFloat(overallPct)) || 0}% from ${formatMonthLabel(allPeriods[0])} to ${formatMonthLabel(allPeriods[allPeriods.length - 1])} ${getPeriodYear(allPeriods[allPeriods.length - 1])}.`,
+      `Overall forecast will ${parseFloat(overallPct) > 0 ? 'increase' : parseFloat(overallPct) < 0 ? 'decrease' : 'remain stable'} by ${Math.abs(parseFloat(overallPct)) || 0}% from ${fmtPeriod(allPeriods[0])} to ${fmtPeriod(allPeriods[allPeriods.length - 1])}.`,
     ]));
-  });
- 
+  } // end per-barangay loop
+
   // Footer
   children.push(
     new Paragraph({ spacing: { before: 480 }, children: [] }),
@@ -1337,8 +1639,7 @@ const ExportMenu = ({ forecastHistory, confirmedBarangays, availableDiseases, ci
       border: { top: { style: BorderStyle.SINGLE, size: 2, color: 'E5E7EB', space: 2 } },
     }),
   );
- 
-  // Build & download
+
   const doc = new Document({
     styles: { default: { document: { run: { font: 'Arial', size: 20 } } } },
     sections: [{
@@ -1351,7 +1652,7 @@ const ExportMenu = ({ forecastHistory, confirmedBarangays, availableDiseases, ci
       children,
     }],
   });
- 
+
   const blob = await Packer.toBlob(doc);
   const url  = URL.createObjectURL(blob);
   const a    = document.createElement('a');
@@ -1362,7 +1663,7 @@ const ExportMenu = ({ forecastHistory, confirmedBarangays, availableDiseases, ci
 }
  
     else {
-      await exportTableData(format, forecastHistory, confirmedBarangays, availableDiseases, cityLabel);
+      await exportTableData(format, forecastHistory, confirmedBarangays, availableDiseases, cityLabel, selectedYear, selectedMonth);
     }
   } finally {
     setExporting(false);
@@ -1959,6 +2260,8 @@ const Prediction = ({ onNavigate, onLogout }) => {
                   confirmedBarangays={confirmedBarangays}
                   availableDiseases={availableDiseases}
                   cityLabel={cityLabel}
+                  selectedYear={selectedYear} 
+                  selectedMonth={selectedMonth}
                 />
               </Box>
             </CardContent>
