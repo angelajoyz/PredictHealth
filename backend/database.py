@@ -413,10 +413,27 @@ def get_aggregated_data(city=None, barangay=None):
 # ─────────────────────────────────────────────
 # HELPER: get saved forecast as API dict
 # ─────────────────────────────────────────────
-def get_saved_forecast_dict(barangay, city=None):
-    f = Forecast.query.filter_by(barangay=barangay).order_by(
-        Forecast.created_at.desc()
-    ).first()
+def get_saved_forecast_dict(barangay, city=None, forecast_year=None):
+    """
+    Fetch the saved forecast for a single barangay.
+    If forecast_year is provided (e.g. 2025), returns the forecast whose
+    forecast_dates include that year. Otherwise returns the most recent.
+    """
+    query = Forecast.query.filter_by(barangay=barangay)
+    if city:
+        query = query.filter(Forecast.city.ilike(f'%{city}%'))
+
+    if forecast_year:
+        year_str = str(forecast_year)
+        all_matches = query.order_by(Forecast.created_at.desc()).all()
+        f = next(
+            (rec for rec in all_matches
+             if rec.forecast_dates and any(d.startswith(year_str) for d in rec.forecast_dates)),
+            None
+        )
+    else:
+        f = query.order_by(Forecast.created_at.desc()).first()
+
     if not f:
         return None
 
@@ -468,25 +485,46 @@ def get_saved_forecast_dict(barangay, city=None):
     }
 
 
-def get_all_saved_forecast_dict(city=None):
+def get_all_saved_forecast_dict(city=None, forecast_year=None):
     """
     Aggregate all saved forecasts across all barangays.
+    If forecast_year is provided, only aggregates forecasts for that year.
     Only sums rows where forecast_period is set (not historical rows).
     """
     from collections import defaultdict
     from sqlalchemy import func
 
-    latest = Forecast.query.order_by(Forecast.created_at.desc()).first()
-    if not latest:
-        return None
+    if forecast_year:
+        year_str = str(forecast_year)
+        all_forecasts = Forecast.query.order_by(Forecast.created_at.desc()).all()
+        matching = [
+            rec for rec in all_forecasts
+            if rec.forecast_dates and any(d.startswith(year_str) for d in rec.forecast_dates)
+        ]
+        if not matching:
+            return None
+        # Collect all unique forecast_dates for that year across all matching forecasts
+        dates_set = []
+        for rec in matching:
+            for d in rec.forecast_dates:
+                if d.startswith(year_str) and d not in dates_set:
+                    dates_set.append(d)
+        forecast_dates = sorted(dates_set)
+        all_diseases = sorted(set(
+            d for rec in matching
+            for d in (rec.diseases or [])
+        ))
+    else:
+        latest = Forecast.query.order_by(Forecast.created_at.desc()).first()
+        if not latest:
+            return None
+        forecast_dates = latest.forecast_dates
+        all_diseases = sorted(set(
+            d for f in Forecast.query.all()
+            for d in (f.diseases or [])
+        ))
 
-    forecast_dates = latest.forecast_dates
-    all_diseases   = sorted(set(
-        d for f in Forecast.query.all()
-        for d in (f.diseases or [])
-    ))
-
-    # FIX: Only sum forecast rows (historical_period IS NULL)
+    # Only sum forecast rows (historical_period IS NULL)
     q = db.session.query(
         ForecastResult.disease_category,
         ForecastResult.forecast_period,

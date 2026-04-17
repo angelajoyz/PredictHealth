@@ -33,7 +33,7 @@ db.init_app(app)
 jwt = JWTManager(app)
 mail = Mail(app)
 
-# Palitan ng ganito:
+
 CORS(app, resources={r"/api/*": {
     "origins": [
         "https://predict-health.vercel.app",
@@ -120,16 +120,32 @@ def save_forecast_flat(user_id, city, barangay, diseases, forecast_months,
     """
     Save forecast header + flat ForecastResult rows.
 
+    ── KEY CHANGE ──────────────────────────────────────────────────────────────
+    Only delete the existing forecast for THIS barangay that belongs to the
+    SAME forecast year (i.e. same year prefix in forecast_dates).
+    Forecasts from previous years are kept intact so historical year data
+    remains viewable in the frontend year selector.
+    ────────────────────────────────────────────────────────────────────────────
+
     Two types of rows are stored:
       1. Forecast rows   — forecast_period set,   historical_period = NULL
       2. Historical rows — historical_period set, forecast_period   = NULL
-
-    This clean separation makes to_api_dict() unambiguous and correct.
     """
-    # Delete old forecasts for this barangay
+    # Determine which year this forecast covers
+    forecast_year_prefix = forecast_dates[0][:4] if forecast_dates else None
+
+    # Only delete existing forecasts for this barangay that cover the SAME year
+    # so that 2024 forecasts are NOT deleted when saving 2025 forecasts
     old = Forecast.query.filter_by(barangay=barangay, city=city or None).all()
     for o in old:
-        db.session.delete(o)
+        # If we know the forecast year, only delete records from the same year
+        if forecast_year_prefix and o.forecast_dates:
+            same_year = any(d.startswith(forecast_year_prefix) for d in o.forecast_dates)
+            if same_year:
+                db.session.delete(o)
+        else:
+            # Fallback: delete all (original behaviour) if we can't determine year
+            db.session.delete(o)
     db.session.flush()
 
     # Create header record
@@ -301,7 +317,6 @@ def run_lstm_for_barangay(barangay, city, target_diseases, forecast_months,
             predictions_scaled   = forecaster.forecast(meta['last_sequence'], n_months=forecast_months)
             predictions_original = processor.inverse_transform_predictions(predictions_scaled, diseases)
 
-            # Always use current date as forecast start
             forecast_dates   = build_forecast_dates(meta['last_date'], forecast_months)
             predictions_dict = {d: clean_floats(predictions_original[d].tolist()) for d in diseases}
 
@@ -342,7 +357,6 @@ def run_lstm_for_barangay(barangay, city, target_diseases, forecast_months,
     predictions_original = processor.inverse_transform_predictions(predictions_scaled, diseases)
 
     last_date      = df_filtered['date'].max()
-    # Always use current date as forecast start
     forecast_dates = build_forecast_dates(last_date, forecast_months)
 
     predictions_dict = {d: clean_floats(predictions_original[d].tolist()) for d in diseases}
@@ -812,29 +826,66 @@ def forecast_all():
         return jsonify({'error': str(e)}), 500
 
 
+# ── NEW: Get forecast for a specific year ─────────────────────────────────────
 @app.route('/api/forecast-saved', methods=['GET'])
 @jwt_required()
 def get_saved_forecast():
-    barangay = request.args.get('barangay', '').strip()
-    city     = request.args.get('city', '').strip()
+    barangay     = request.args.get('barangay', '').strip()
+    city         = request.args.get('city', '').strip()
+    # Optional: filter by forecast year (e.g. "2024" or "2025")
+    forecast_year = request.args.get('forecast_year', '').strip()
 
     if not barangay:
         return jsonify({'error': 'barangay is required'}), 400
 
     try:
         if barangay == '__ALL__':
-            result = get_all_saved_forecast_dict(city=city or None)
+            result = get_all_saved_forecast_dict(city=city or None, forecast_year=forecast_year or None)
             if not result:
                 return jsonify({'error': 'No saved forecasts found.', 'not_found': True}), 404
             return jsonify(result), 200
         else:
-            result = get_saved_forecast_dict(barangay=barangay, city=city or None)
+            result = get_saved_forecast_dict(barangay=barangay, city=city or None, forecast_year=forecast_year or None)
             if not result:
                 return jsonify({
-                    'error': f'No saved forecast for {barangay}. Please run Generate All first.',
+                    'error': f'No saved forecast for {barangay}. Please run Generate first.',
                     'not_found': True,
                 }), 404
             return jsonify(result), 200
+
+    except Exception as e:
+        import traceback
+        print(traceback.format_exc())
+        return jsonify({'error': str(e)}), 500
+
+
+# ── NEW: Get all available forecast years for a barangay ─────────────────────
+@app.route('/api/forecast-years', methods=['GET'])
+@jwt_required()
+def get_forecast_years():
+    """Returns list of years that have saved forecasts, e.g. [2024, 2025]"""
+    barangay = request.args.get('barangay', '').strip()
+    city     = request.args.get('city', '').strip()
+
+    try:
+        q = Forecast.query
+        if barangay and barangay != '__ALL__':
+            q = q.filter(Forecast.barangay == barangay)
+        if city:
+            q = q.filter(Forecast.city.ilike(f'%{city}%'))
+
+        all_forecasts = q.with_entities(Forecast.forecast_dates).all()
+
+        years = set()
+        for row in all_forecasts:
+            if row.forecast_dates:
+                for d in row.forecast_dates:
+                    try:
+                        years.add(int(d[:4]))
+                    except Exception:
+                        pass
+
+        return jsonify({'years': sorted(years, reverse=True)}), 200
 
     except Exception as e:
         import traceback
@@ -935,7 +986,6 @@ def disease_breakdown():
         print(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
 
-
 @app.route('/api/dataset-info', methods=['GET'])
 @jwt_required()
 def dataset_info():
@@ -958,7 +1008,6 @@ def dataset_info():
         city_val            = rows[0].city or ''
         has_saved_forecasts = Forecast.query.first() is not None
 
-        # Compute dataset_end_date directly from the database
         from sqlalchemy import func as sqlfunc
         end_row = db.session.query(
             sqlfunc.max(BarangayData.year).label('max_year'),
@@ -971,12 +1020,38 @@ def dataset_info():
             if month_row and month_row.max_month:
                 dataset_end_date = f"{end_row.max_year}-{str(month_row.max_month).zfill(2)}-01"
 
-        # Barangays that already have a saved forecast (from DB, not localStorage)
-        forecasted_barangays = [
-            f.barangay for f in
-            Forecast.query.with_entities(Forecast.barangay).distinct().all()
-            if f.barangay
-        ]
+        # Compute forecast_year from dataset_end_date
+        forecast_year = None
+        if dataset_end_date:
+            try:
+                end_dt = datetime.strptime(dataset_end_date[:10], '%Y-%m-%d')
+                forecast_year = end_dt.year + 1
+            except Exception:
+                pass
+
+        # Only return barangays forecasted FOR the current forecast_year
+        forecasted_barangays = []
+        if forecast_year:
+            year_prefix = str(forecast_year)
+            all_forecasts = Forecast.query.with_entities(
+                Forecast.barangay, Forecast.forecast_dates
+            ).all()
+            forecasted_barangays = list(set(
+                f.barangay for f in all_forecasts
+                if f.barangay and f.forecast_dates and
+                any(d.startswith(year_prefix) for d in f.forecast_dates)
+            ))
+
+        # Also return all available forecast years in the DB (for the year selector)
+        all_forecast_years = set()
+        all_year_records = Forecast.query.with_entities(Forecast.forecast_dates).all()
+        for row in all_year_records:
+            if row.forecast_dates:
+                for d in row.forecast_dates:
+                    try:
+                        all_forecast_years.add(int(d[:4]))
+                    except Exception:
+                        pass
 
         return jsonify({
             'barangays':            barangays,
@@ -984,127 +1059,15 @@ def dataset_info():
             'city':                 city_val,
             'has_saved_forecasts':  has_saved_forecasts,
             'dataset_end_date':     dataset_end_date,
+            'forecast_year':        forecast_year,
             'forecasted_barangays': forecasted_barangays,
+            'available_forecast_years': sorted(all_forecast_years, reverse=True),
         }), 200
 
     except Exception as e:
         import traceback
         print(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
-
-
-@app.route('/api/age-sex-breakdown', methods=['GET'])
-@jwt_required()
-def age_sex_breakdown():
-    from sqlalchemy import func
-
-    category = request.args.get('category', '').strip()
-    barangay = request.args.get('barangay', '__ALL__').strip()
-    city     = request.args.get('city', '').strip()
-
-    if not category:
-        return jsonify({'error': 'category is required'}), 400
-
-    try:
-        age_cols = {
-            'under1':    ('under1_m',    'under1_f'),
-            '1-4':       ('age_1_4_m',   'age_1_4_f'),
-            '5-9':       ('age_5_9_m',   'age_5_9_f'),
-            '10-14':     ('age_10_14_m', 'age_10_14_f'),
-            '15-19':     ('age_15_19_m', 'age_15_19_f'),
-            '20-24':     ('age_20_24_m', 'age_20_24_f'),
-            '25-29':     ('age_25_29_m', 'age_25_29_f'),
-            '30-34':     ('age_30_34_m', 'age_30_34_f'),
-            '35-39':     ('age_35_39_m', 'age_35_39_f'),
-            '40-44':     ('age_40_44_m', 'age_40_44_f'),
-            '45-49':     ('age_45_49_m', 'age_45_49_f'),
-            '50-54':     ('age_50_54_m', 'age_50_54_f'),
-            '55-59':     ('age_55_59_m', 'age_55_59_f'),
-            '60-64':     ('age_60_64_m', 'age_60_64_f'),
-            '65+':       ('age_65above_m','age_65above_f'),
-        }
-
-        q = db.session.query(BarangayData).filter(BarangayData.disease_category == category)
-        if barangay and barangay != '__ALL__':
-            q = q.filter(BarangayData.barangay.ilike(barangay))
-        if city:
-            q = q.filter(BarangayData.city.ilike(f'%{city}%'))
-
-        rows = q.all()
-
-        totals = {group: {'male': 0, 'female': 0} for group in age_cols}
-        total_male = total_female = 0
-
-        for row in rows:
-            for group, (m_col, f_col) in age_cols.items():
-                m_val = getattr(row, m_col) or 0
-                f_val = getattr(row, f_col) or 0
-                totals[group]['male']   += m_val
-                totals[group]['female'] += f_val
-                total_male   += m_val
-                total_female += f_val
-
-        breakdown = [
-            {
-                'age_group': group,
-                'male':      totals[group]['male'],
-                'female':    totals[group]['female'],
-                'total':     totals[group]['male'] + totals[group]['female'],
-            }
-            for group in age_cols
-        ]
-
-        return jsonify({
-            'category':     category,
-            'barangay':     barangay,
-            'total_male':   total_male,
-            'total_female': total_female,
-            'total_cases':  total_male + total_female,
-            'breakdown':    breakdown,
-        }), 200
-
-    except Exception as e:
-        import traceback
-        print(traceback.format_exc())
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/api/upload-history', methods=['GET'])
-@jwt_required()
-def get_upload_history():
-    try:
-        uploads = UploadHistory.query.order_by(UploadHistory.uploaded_at.desc()).all()
-        return jsonify([u.to_dict() for u in uploads]), 200
-    except Exception as e:
-        import traceback
-        print(traceback.format_exc())
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/api/upload-history/<int:upload_id>', methods=['DELETE', 'OPTIONS'])
-@jwt_required()
-def delete_upload_history(upload_id):
-    if request.method == 'OPTIONS':
-        return '', 204
-
-    try:
-        upload = UploadHistory.query.get(upload_id)
-        if not upload:
-            return jsonify({'error': 'Upload not found'}), 404
-
-        deleted_count = BarangayData.query.filter_by(upload_id=upload_id).delete()
-        db.session.delete(upload)
-        db.session.commit()
-
-        print(f"   🗑️  Deleted upload id={upload_id} + {deleted_count} barangay records")
-        return jsonify({'message': 'Deleted successfully', 'deleted_records': deleted_count}), 200
-
-    except Exception as e:
-        db.session.rollback()
-        import traceback
-        print(traceback.format_exc())
-        return jsonify({'error': str(e)}), 500
-
 
 @app.route('/api/barangay-data', methods=['GET'])
 @jwt_required()
@@ -1166,6 +1129,60 @@ def get_barangay_data():
         print(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/upload-history', methods=['GET'])
+@jwt_required()
+def get_upload_history():
+    current_user = get_current_user()
+    try:
+        uploads = UploadHistory.query.filter_by(
+        status='success'
+        ).order_by(UploadHistory.uploaded_at.desc()).all()
+        
+        return jsonify([{
+            'id':               u.id,
+            'filename':         u.filename,
+            'city':             u.city,
+            'barangay_count':   u.barangay_count,
+            'disease_count':    u.disease_count,
+            'date_range_start': str(u.date_range_start) if u.date_range_start else None,
+            'date_range_end':   str(u.date_range_end)   if u.date_range_end   else None,
+            'status':           u.status,
+            'error_msg':        u.error_msg,
+            'uploaded_at':      u.uploaded_at.isoformat() if u.uploaded_at else None,
+        } for u in uploads]), 200
+
+    except Exception as e:
+        import traceback
+        print(traceback.format_exc())
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/upload-history/<int:upload_id>', methods=['DELETE'])
+@jwt_required()
+def delete_upload_history(upload_id):
+    current_user = get_current_user()
+    try:
+        upload = UploadHistory.query.get_or_404(upload_id)
+
+        if upload.user_id != current_user.id and current_user.role != 'admin':
+            return jsonify({'error': 'Access denied'}), 403
+
+        BarangayData.query.filter_by(upload_id=upload_id).delete()
+
+        forecasts = Forecast.query.filter_by(user_id=upload.user_id).all()
+        for f in forecasts:
+            ForecastResult.query.filter_by(forecast_id=f.id).delete()
+            db.session.delete(f)
+
+        db.session.delete(upload)
+        db.session.commit()
+
+        return jsonify({'message': 'Upload deleted successfully'}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        import traceback
+        print(traceback.format_exc())
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     init_db(app)

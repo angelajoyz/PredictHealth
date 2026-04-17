@@ -2,10 +2,9 @@ import { forecastAll, getSavedForecast, getDiseaseBreakdown } from './services/a
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Box, Typography, Card, CardContent, Button,
-  Alert, LinearProgress, Select, MenuItem as MenuItemComponent,
+  Alert, Select, MenuItem as MenuItemComponent,
   CircularProgress, Skeleton, Tooltip, Dialog, DialogTitle,
-  DialogContent, DialogActions, Checkbox, FormControlLabel,
-  Chip,
+  DialogContent, DialogActions, Checkbox, Chip,
 } from '@mui/material';
 import {
   InfoOutlined as InfoOutlinedIcon,
@@ -21,6 +20,7 @@ import {
   Warning as WarningIcon,
   ErrorOutline as ErrorOutlineIcon,
   Lock as LockIcon,
+  History as HistoryIcon,
 } from '@mui/icons-material';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid,
@@ -36,45 +36,31 @@ const MAX_BARANGAY_SELECTION = 5;
 const checkDatasetReadyForForecast = () => {
   const datasetEndRaw = localStorage.getItem('datasetEndDate') || '';
   if (!datasetEndRaw) return { ready: false, reason: 'no_data' };
-
   const parsed = new Date(datasetEndRaw);
   if (Number.isNaN(parsed.getTime())) return { ready: false, reason: 'invalid_date' };
-
-  const endMonth = parsed.getMonth(); // 0-indexed, so 11 = December
+  const endMonth = parsed.getMonth();
   const endYear  = parsed.getFullYear();
-
   if (endMonth !== 11) {
     const monthName = parsed.toLocaleDateString('en-PH', { month: 'long' });
-    return {
-      ready: false,
-      reason: 'incomplete_year',
-      endMonth: monthName,
-      endYear,
-      forecastYear: endYear + 1,
-    };
+    return { ready: false, reason: 'incomplete_year', endMonth: monthName, endYear, forecastYear: endYear + 1 };
   }
-
   return { ready: true, endYear, forecastYear: endYear + 1 };
 };
 
-// ── Forecast months = from Jan to December of the forecast year (based on uploaded data)
+// ── Returns forecastYear too so we can key localStorage by year ───────────────
 const computeForecastParams = () => {
   const now = new Date();
   const datasetEndRaw = localStorage.getItem('datasetEndDate') || '';
   let forecastYear = now.getFullYear();
-
   if (datasetEndRaw) {
     const parsed = new Date(datasetEndRaw);
-    if (!Number.isNaN(parsed.getTime())) {
-      forecastYear = parsed.getFullYear() + 1;
-    }
+    if (!Number.isNaN(parsed.getTime())) forecastYear = parsed.getFullYear() + 1;
   }
-
   const reference = new Date(forecastYear, 0, 1);
   const endOfYear = new Date(forecastYear, 11, 1);
   const months = (endOfYear.getFullYear() - reference.getFullYear()) * 12
     + (endOfYear.getMonth() - reference.getMonth()) + 1;
-  return { forecastMonths: Math.max(months, 1), referenceDate: reference };
+  return { forecastMonths: Math.max(months, 1), referenceDate: reference, forecastYear };
 };
 
 const CATEGORY_MAP = {
@@ -106,8 +92,7 @@ const CATEGORY_MAP = {
 
 const getDiseaseInfo = (col) => {
   if (CATEGORY_MAP[col]) return CATEGORY_MAP[col];
-  const label = col
-    .replace(/_cases$/, '').replace(/_prevalence_pct$/, ' %')
+  const label = col.replace(/_cases$/, '').replace(/_prevalence_pct$/, ' %')
     .replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
   return { label, color: T.blue, icon: '🏥' };
 };
@@ -124,7 +109,7 @@ const getTrend = (preds) => {
 
 const isForecastValid = (forecastDates) => {
   if (!forecastDates || forecastDates.length === 0) return false;
-  const now       = new Date();
+  const now = new Date();
   const endOfYear = `${now.getFullYear()}-12`;
   return forecastDates[forecastDates.length - 1] >= endOfYear;
 };
@@ -167,33 +152,32 @@ const TrendRowIcon = ({ type }) => {
 };
 
 // ── Barangay Selection Dialog ─────────────────────────────────────────────────
-// forecastedBarangays: list of barangays that already have saved forecasts — they are locked/non-selectable
+// KEY CHANGE: forecasted barangays are FULLY LOCKED — cannot be selected at all.
+// They can only be selected again once a new dataset year is uploaded.
 const BarangaySelectDialog = ({
   open, allBarangays, forecastedBarangays = [], forecastMonths, referenceDate, onConfirm, onCancel,
 }) => {
   const [selected, setSelected] = useState([]);
   const decYear    = referenceDate ? referenceDate.getFullYear() : new Date().getFullYear();
-  const startLabel = referenceDate
-    ? referenceDate.toLocaleDateString('en-PH', { month: 'long' })
-    : '—';
+  const startLabel = referenceDate ? referenceDate.toLocaleDateString('en-PH', { month: 'long' }) : '—';
 
-  // Reset selection whenever dialog opens
+  // Only barangays NOT yet forecasted this year are selectable
+  const selectableBarangays = allBarangays.filter(b => !forecastedBarangays.includes(b));
+  const lockedCount = forecastedBarangays.length;
+  const allDone = selectableBarangays.length === 0;
+
   useEffect(() => { if (open) setSelected([]); }, [open]);
 
   const toggle = (brgy) => {
+    // Double-guard: never allow toggling a forecasted barangay
+    if (forecastedBarangays.includes(brgy)) return;
     setSelected(prev =>
-      prev.includes(brgy)
-        ? prev.filter(b => b !== brgy)
-        : prev.length < MAX_BARANGAY_SELECTION
-          ? [...prev, brgy]
-          : prev
+      prev.includes(brgy) ? prev.filter(b => b !== brgy)
+        : prev.length < MAX_BARANGAY_SELECTION ? [...prev, brgy] : prev
     );
   };
 
   const atLimit = selected.length >= MAX_BARANGAY_SELECTION;
-
-  // Count how many barangays still need forecasts
-  const unforecastedCount = allBarangays.filter(b => !forecastedBarangays.includes(b)).length;
 
   return (
     <Dialog open={open} onClose={onCancel} maxWidth="sm" fullWidth
@@ -216,17 +200,30 @@ const BarangaySelectDialog = ({
       <Box sx={{ borderBottom: `1px solid ${T.borderSoft}`, mx: 3 }} />
 
       <DialogContent sx={{ pt: 2, pb: 1 }}>
-        {/* Limit notice */}
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, p: '9px 12px', mb: 2,
+
+        {/* Info banner */}
+        <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, p: '9px 12px', mb: 2,
           borderRadius: '8px', backgroundColor: T.blueDim, border: `1px solid rgba(37,99,235,0.18)` }}>
-          <InfoOutlinedIcon sx={{ fontSize: 14, color: T.blue, flexShrink: 0 }} />
+          <InfoOutlinedIcon sx={{ fontSize: 14, color: T.blue, flexShrink: 0, mt: '1px' }} />
           <Typography sx={{ fontSize: 12, color: T.textBody }}>
-            Select <strong>up to {MAX_BARANGAY_SELECTION} barangays</strong> to generate forecasts for.
-            {forecastedBarangays.length > 0 && (
-              <> Barangays marked <strong style={{ color: T.ok }}>Forecasted</strong> already have saved results.</>
-            )}
+            Select <strong>up to {MAX_BARANGAY_SELECTION} barangays</strong> to generate {decYear} forecasts.
+            
           </Typography>
         </Box>
+
+        {/* All done notice */}
+        {allDone && (
+          <Box sx={{ p: '10px 14px', mb: 2, borderRadius: '8px',
+            backgroundColor: T.okBg, border: `1px solid ${T.okBorder}` }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <CheckCircleIcon sx={{ fontSize: 15, color: T.ok }} />
+              <Typography sx={{ fontSize: 12.5, fontWeight: 600, color: T.ok }}>
+                All {lockedCount} barangays already have {decYear} forecasts.
+              </Typography>
+            </Box>
+            
+          </Box>
+        )}
 
         {/* Selected chips */}
         {selected.length > 0 && (
@@ -240,80 +237,78 @@ const BarangaySelectDialog = ({
           </Box>
         )}
 
-        {/* Counter */}
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
           <Typography sx={{ fontSize: 11.5, fontWeight: 600, color: T.textFaint,
             textTransform: 'uppercase', letterSpacing: '0.4px' }}>
             All Barangays ({allBarangays.length})
-            {forecastedBarangays.length > 0 && (
+            {lockedCount > 0 && (
               <Typography component="span" sx={{ fontSize: 11, color: T.ok, fontWeight: 500,
                 textTransform: 'none', letterSpacing: 0, ml: 0.75 }}>
-                · {forecastedBarangays.length} already forecasted
+                · {lockedCount} done this year
               </Typography>
             )}
           </Typography>
-          <Typography sx={{
-            fontSize: 12, fontWeight: 600,
-            color: atLimit ? T.danger : T.textMuted,
-          }}>
+          <Typography sx={{ fontSize: 12, fontWeight: 600, color: atLimit ? T.danger : T.textMuted }}>
             {selected.length} / {MAX_BARANGAY_SELECTION} selected
           </Typography>
         </Box>
 
-        {/* Barangay list */}
         <Box sx={{ maxHeight: 280, overflowY: 'auto', border: `1px solid ${T.border}`,
           borderRadius: '8px', backgroundColor: '#FAFBFC' }}>
           {allBarangays.map((brgy, idx) => {
-            const isChecked    = selected.includes(brgy);
             const isForecasted = forecastedBarangays.includes(brgy);
-            // Forecasted barangays are always locked. Non-forecasted are locked only when at limit and not checked.
-            const isDisabled   = isForecasted || (atLimit && !isChecked);
+            const isChecked    = selected.includes(brgy);
+            // Locked if: already forecasted this year OR at limit and not selected
+            const isLocked     = isForecasted || (atLimit && !isChecked);
+
             return (
-              <Box key={brgy} onClick={() => !isDisabled && toggle(brgy)}
+              <Box key={brgy} onClick={() => !isLocked && toggle(brgy)}
                 sx={{
                   display: 'flex', alignItems: 'center', gap: 1.25,
                   px: 2, py: 1.1,
                   borderBottom: idx < allBarangays.length - 1 ? `1px solid ${T.borderSoft}` : 'none',
-                  cursor: isDisabled ? 'not-allowed' : 'pointer',
-                  backgroundColor: isChecked
-                    ? T.blueDim
-                    : isForecasted
-                      ? 'rgba(16,185,129,0.04)'
-                      : 'transparent',
-                  opacity: isForecasted ? 0.6 : (atLimit && !isChecked) ? 0.45 : 1,
+                  cursor: isLocked ? 'not-allowed' : 'pointer',
+                  // Forecasted = distinct locked style; limit = lighter dim
+                  backgroundColor: isForecasted
+                    ? '#F8FFF8'
+                    : isChecked ? T.blueDim : 'transparent',
+                  opacity: isForecasted ? 0.7 : atLimit && !isChecked ? 0.45 : 1,
                   transition: 'background 0.12s',
-                  '&:hover': !isDisabled ? { backgroundColor: isChecked ? T.blueDim : T.pageBg } : {},
+                  '&:hover': (!isLocked) ? { backgroundColor: isChecked ? T.blueDim : T.pageBg } : {},
                 }}>
-                <Checkbox
-                  checked={isChecked}
-                  size="small"
-                  disabled={isDisabled}
-                  sx={{ p: 0, color: T.border, '&.Mui-checked': { color: T.blue } }}
-                />
+
+                {/* Checkbox — hidden/replaced for forecasted, shown normally for others */}
+                {isForecasted ? (
+                  <CheckCircleIcon sx={{ fontSize: 18, color: T.ok, flexShrink: 0 }} />
+                ) : (
+                  <Checkbox checked={isChecked} size="small"
+                    disabled={isLocked}
+                    sx={{ p: 0, color: T.border, '&.Mui-checked': { color: T.blue } }} />
+                )}
+
                 <Typography sx={{
                   fontSize: 13,
-                  color: isForecasted ? T.textMuted : (atLimit && !isChecked) ? T.textFaint : T.textBody,
-                  fontWeight: isChecked ? 600 : 400,
+                  color: isForecasted ? T.ok : isLocked ? T.textFaint : T.textBody,
+                  fontWeight: isForecasted ? 600 : isChecked ? 600 : 400,
                   flex: 1,
                 }}>
                   {brgy}
                 </Typography>
 
-                {/* Forecasted badge — shown when barangay already has a saved forecast */}
-                {isForecasted ? (
-                  <Box sx={{
-                    display: 'flex', alignItems: 'center', gap: 0.4,
+                {/* Done badge for forecasted */}
+                {isForecasted && (
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.4,
                     px: '8px', py: '2px', borderRadius: '20px',
-                    backgroundColor: T.okBg,
-                    border: `1px solid ${T.okBorder}`,
-                    flexShrink: 0,
-                  }}>
-                    <CheckCircleIcon sx={{ fontSize: 11, color: T.ok }} />
-                    <Typography sx={{ fontSize: 10.5, color: T.ok, fontWeight: 600 }}>Forecasted</Typography>
+                    backgroundColor: T.okBg, border: `1px solid ${T.okBorder}`, flexShrink: 0 }}>
+                    
+                    <Typography sx={{ fontSize: 10.5, color: T.ok, fontWeight: 600 }}>Done</Typography>
                   </Box>
-                ) : (atLimit && !isChecked) ? (
+                )}
+
+                {/* Lock icon for limit-reached-but-not-forecasted */}
+                {!isForecasted && atLimit && !isChecked && (
                   <LockIcon sx={{ fontSize: 12, color: T.textFaint, ml: 'auto' }} />
-                ) : null}
+                )}
               </Box>
             );
           })}
@@ -327,16 +322,6 @@ const BarangaySelectDialog = ({
             </Typography>
           </Box>
         )}
-
-        {/* All barangays already forecasted notice */}
-        {unforecastedCount === 0 && forecastedBarangays.length > 0 && (
-          <Box sx={{ mt: 1.25, p: '8px 12px', borderRadius: '7px',
-            backgroundColor: T.okBg, border: `1px solid ${T.okBorder}` }}>
-            <Typography sx={{ fontSize: 11.5, color: T.ok }}>
-              ✅ All barangays already have saved forecasts. Select any to regenerate.
-            </Typography>
-          </Box>
-        )}
       </DialogContent>
 
       <DialogActions sx={{ px: 3, pb: 2.5, pt: 1.5, gap: 1 }}>
@@ -346,13 +331,15 @@ const BarangaySelectDialog = ({
           Cancel
         </Button>
         <Button onClick={() => onConfirm(selected)} variant="contained"
-          disabled={selected.length === 0}
+          disabled={selected.length === 0 || allDone}
           startIcon={<PsychologyIcon sx={{ fontSize: 15 }} />}
           sx={{ textTransform: 'none', fontSize: 13, fontWeight: 600,
             backgroundColor: T.blue, borderRadius: '8px', px: 2.5,
-            '&:hover': { backgroundColor: T.blueMid },
-            '&:disabled': { opacity: 0.45 } }}>
-          Generate for {selected.length > 0 ? `${selected.length} Barangay${selected.length > 1 ? 's' : ''}` : '…'}
+            '&:hover': { backgroundColor: T.blueMid }, '&:disabled': { opacity: 0.45 } }}>
+          {allDone
+            ? `All ${decYear} forecasts done`
+            : `Generate for ${selected.length > 0 ? `${selected.length} Barangay${selected.length > 1 ? 's' : ''}` : '…'}`
+          }
         </Button>
       </DialogActions>
     </Dialog>
@@ -380,25 +367,14 @@ const DatasetNotReadyBanner = ({ endMonth, endYear, forecastYear }) => (
 // ── Generation Progress Overlay ───────────────────────────────────────────────
 const GenerationOverlay = ({ progress, total, currentBarangay, completedBarangays, failedBarangays, forecastMonths, referenceDate }) => {
   const pct = total > 0 ? Math.round((progress / total) * 100) : 0;
-  const startLabel = referenceDate
-    ? referenceDate.toLocaleDateString('en-PH', { month: 'long' })
-    : '—';
+  const startLabel = referenceDate ? referenceDate.toLocaleDateString('en-PH', { month: 'long' }) : '—';
   const decYear = referenceDate ? referenceDate.getFullYear() : new Date().getFullYear();
-
   return (
-    <Box sx={{
-      position: 'fixed', inset: 0, zIndex: 1500,
-      backgroundColor: 'rgba(15,23,42,0.72)',
-      backdropFilter: 'blur(4px)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-    }}>
-      <Box sx={{
-        width: '92vw', maxWidth: 520,
-        backgroundColor: '#FFFFFF', borderRadius: '16px',
-        border: `1px solid ${T.border}`,
-        boxShadow: '0 24px 64px rgba(0,0,0,0.22)',
-        overflow: 'hidden',
-      }}>
+    <Box sx={{ position: 'fixed', inset: 0, zIndex: 1500,
+      backgroundColor: 'rgba(15,23,42,0.72)', backdropFilter: 'blur(4px)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <Box sx={{ width: '92vw', maxWidth: 520, backgroundColor: '#FFFFFF', borderRadius: '16px',
+        border: `1px solid ${T.border}`, boxShadow: '0 24px 64px rgba(0,0,0,0.22)', overflow: 'hidden' }}>
         <Box sx={{ px: 3, pt: 2.5, pb: 2, borderBottom: `1px solid ${T.borderSoft}`, backgroundColor: T.pageBg }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 0.5 }}>
             <Box sx={{ width: 36, height: 36, borderRadius: '10px', backgroundColor: T.blueDim,
@@ -415,9 +391,7 @@ const GenerationOverlay = ({ progress, total, currentBarangay, completedBarangay
         </Box>
         <Box sx={{ px: 3, pt: 2.5, pb: 1 }}>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-            <Typography sx={{ fontSize: 12.5, fontWeight: 600, color: T.textBody }}>
-              {progress} of {total} barangays
-            </Typography>
+            <Typography sx={{ fontSize: 12.5, fontWeight: 600, color: T.textBody }}>{progress} of {total} barangays</Typography>
             <Typography sx={{ fontSize: 13, fontWeight: 700, color: T.blue }}>{pct}%</Typography>
           </Box>
           <Box sx={{ height: 8, borderRadius: 4, backgroundColor: T.borderSoft, overflow: 'hidden' }}>
@@ -442,7 +416,7 @@ const GenerationOverlay = ({ progress, total, currentBarangay, completedBarangay
               Completed ({completedBarangays.length})
             </Typography>
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-              {[...completedBarangays].reverse().map((b) => (
+              {[...completedBarangays].reverse().map(b => (
                 <Box key={b} sx={{ display: 'flex', alignItems: 'center', gap: 1, p: '6px 10px',
                   borderRadius: '6px', backgroundColor: T.okBg, border: `1px solid ${T.okBorder}` }}>
                   <CheckCircleIcon sx={{ fontSize: 12, color: T.ok, flexShrink: 0 }} />
@@ -458,7 +432,7 @@ const GenerationOverlay = ({ progress, total, currentBarangay, completedBarangay
               textTransform: 'uppercase', letterSpacing: '0.5px', mb: 0.75 }}>
               Failed ({failedBarangays.length})
             </Typography>
-            {failedBarangays.map((b) => (
+            {failedBarangays.map(b => (
               <Box key={b} sx={{ display: 'flex', alignItems: 'center', gap: 1, p: '6px 10px',
                 borderRadius: '6px', mb: '5px', backgroundColor: T.dangerBg, border: `1px solid ${T.dangerBorder}` }}>
                 <ErrorOutlineIcon sx={{ fontSize: 12, color: T.danger, flexShrink: 0 }} />
@@ -473,7 +447,6 @@ const GenerationOverlay = ({ progress, total, currentBarangay, completedBarangay
           <WarningIcon sx={{ fontSize: 14, color: '#D97706', mt: '1px', flexShrink: 0 }} />
           <Typography sx={{ fontSize: 11.5, color: '#92400E', lineHeight: 1.55 }}>
             <strong>Please don't close or navigate away.</strong> The model is still training.
-            Interrupting may result in incomplete or missing forecasts.
           </Typography>
         </Box>
       </Box>
@@ -497,19 +470,17 @@ const NavigationBlockDialog = ({ open, onStay, onLeave }) => (
     <Box sx={{ borderBottom: `1px solid ${T.borderSoft}`, mx: 3 }} />
     <DialogContent sx={{ pt: 2 }}>
       <Typography sx={{ fontSize: 13, color: T.textBody, lineHeight: 1.7, mb: 1.5 }}>
-        A forecast generation is currently running. If you leave now, the process may be interrupted and some barangays may not have forecasts.
+        A forecast generation is currently running. If you leave now, the process may be interrupted.
       </Typography>
       <Box sx={{ p: '10px 14px', borderRadius: '8px', backgroundColor: T.dangerBg, border: `1px solid ${T.dangerBorder}` }}>
         <Typography sx={{ fontSize: 12.5, color: T.danger, lineHeight: 1.6 }}>
-          ⚠️ Incomplete forecasts cannot be recovered. You will need to run Generate All again.
+          ⚠️ Incomplete forecasts cannot be recovered.
         </Typography>
       </Box>
     </DialogContent>
     <DialogActions sx={{ px: 3, pb: 2.5, gap: 1 }}>
       <Button onClick={onLeave} sx={{ textTransform: 'none', fontSize: 13, color: T.textMuted,
-        border: `1px solid ${T.border}`, borderRadius: '8px', px: 2 }}>
-        Leave Anyway
-      </Button>
+        border: `1px solid ${T.border}`, borderRadius: '8px', px: 2 }}>Leave Anyway</Button>
       <Button onClick={onStay} variant="contained"
         sx={{ textTransform: 'none', fontSize: 13, fontWeight: 600,
           backgroundColor: T.blue, borderRadius: '8px', px: 2, '&:hover': { backgroundColor: T.blueMid } }}>
@@ -518,52 +489,6 @@ const NavigationBlockDialog = ({ open, onStay, onLeave }) => (
     </DialogActions>
   </Dialog>
 );
-
-// ── Regenerate Confirm Dialog ──────────────────────────────────────────────────
-const RegenerateConfirmDialog = ({ open, forecastMonths, barangayCount, referenceDate, onConfirm, onCancel }) => {
-  const startLabel = referenceDate ? referenceDate.toLocaleDateString('en-PH', { month: 'long' }) : '—';
-  const decYear = referenceDate ? referenceDate.getFullYear() : new Date().getFullYear();
-  return (
-    <Dialog open={open} onClose={onCancel} maxWidth="xs" fullWidth
-      PaperProps={{ sx: { borderRadius: '14px', border: `1px solid ${T.border}` } }}>
-      <DialogTitle sx={{ pb: 1 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25 }}>
-          <Box sx={{ width: 32, height: 32, borderRadius: '8px', backgroundColor: T.warnBg,
-            display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            <WarningIcon sx={{ fontSize: 16, color: T.warn }} />
-          </Box>
-          <Typography sx={{ fontSize: 15, fontWeight: 700, color: T.textHead }}>Regenerate Forecasts?</Typography>
-        </Box>
-      </DialogTitle>
-      <Box sx={{ borderBottom: `1px solid ${T.borderSoft}`, mx: 3 }} />
-      <DialogContent sx={{ pt: 2 }}>
-        <Typography sx={{ fontSize: 13, color: T.textBody, lineHeight: 1.7, mb: 1.5 }}>
-          You already have saved forecasts. Generating again will <strong>replace forecasts</strong> for the selected barangays.
-        </Typography>
-        <Box sx={{ p: '10px 14px', borderRadius: '8px', backgroundColor: T.warnBg, border: `1px solid ${T.warnBorder}` }}>
-          <Typography sx={{ fontSize: 12.5, color: T.textBody, lineHeight: 1.6 }}>
-            📅 Will generate <strong>{forecastMonths} month{forecastMonths > 1 ? 's' : ''}</strong> of forecasts
-            ({startLabel} – December {decYear}) for up to <strong>{MAX_BARANGAY_SELECTION} selected barangay{barangayCount !== 1 ? 's' : ''}</strong>.
-          </Typography>
-        </Box>
-        <Typography sx={{ fontSize: 12, color: T.textMuted, mt: 1.5 }}>
-          Are you sure you want to continue?
-        </Typography>
-      </DialogContent>
-      <DialogActions sx={{ px: 3, pb: 2.5, gap: 1 }}>
-        <Button onClick={onCancel} sx={{ textTransform: 'none', fontSize: 13, color: T.textMuted,
-          border: `1px solid ${T.border}`, borderRadius: '8px', px: 2 }}>
-          Cancel
-        </Button>
-        <Button onClick={onConfirm} variant="contained"
-          sx={{ textTransform: 'none', fontSize: 13, fontWeight: 600,
-            backgroundColor: T.warn, borderRadius: '8px', px: 2, '&:hover': { backgroundColor: '#D97706' } }}>
-          Yes, Select Barangays
-        </Button>
-      </DialogActions>
-    </Dialog>
-  );
-};
 
 // ── Expandable Result Row ──────────────────────────────────────────────────────
 const ResultRow = ({ item, forecastData, selectedBarangay }) => {
@@ -736,57 +661,58 @@ const Dashboard = ({ onNavigate, onLogout }) => {
   const [forecastLoading,     setForecastLoading]    = useState(false);
   const [fetchingForecast,    setFetchingForecast]   = useState(false);
   const [forecastError,       setForecastError]      = useState('');
-  const [forecastData,        setForecastData]       = useState(() => {
-    try { const s = localStorage.getItem('cachedForecastData'); return s ? JSON.parse(s) : null; }
-    catch { return null; }
-  });
+  const [forecastData,        setForecastData]       = useState(null);
   const [generateAllProgress, setGenerateAllProgress] = useState(null);
   const [hasSavedForecasts,   setHasSavedForecasts]  = useState(false);
   const [forecastIsValid,     setForecastIsValid]    = useState(false);
   const [showBarangaySelect,  setShowBarangaySelect] = useState(false);
   const [hasData,             setHasData]            = useState(false);
-  const [uploadedInfo,        setUploadedInfo]       = useState(null);
   const [forecastHistory,     setForecastHistory]    = useState([]);
   const [diseaseSummary,      setDiseaseSummary]     = useState([]);
   const [totalForecasted,     setTotalForecasted]    = useState(0);
-  const [latestForecastMonth, setLatestForecastMonth]= useState('N/A');
   const [hasDbData,           setHasDbData]          = useState(false);
   const [checkingData,        setCheckingData]       = useState(true);
   const [hasNewUpload,        setHasNewUpload]       = useState(false);
   const [datasetReadiness,    setDatasetReadiness]   = useState(null);
-  // ── NEW: tracks which barangays already have a saved forecast ────────────────
+
+  // ── Year selector state ───────────────────────────────────────────────────────
+  const [availableForecastYears, setAvailableForecastYears] = useState([]);
+  const [selectedForecastYear,   setSelectedForecastYear]   = useState(null);
+
+  // ── forecastedBarangays keyed by forecast year ────────────────────────────────
+  const { forecastMonths, referenceDate, forecastYear } = computeForecastParams();
+  const forecastedBarangaysKey = `forecastedBarangays_${forecastYear}`;
+
   const [forecastedBarangays, setForecastedBarangays] = useState(() => {
-    try { const s = localStorage.getItem('forecastedBarangays'); return s ? JSON.parse(s) : []; }
-    catch { return []; }
+    try {
+      const { forecastYear: fy } = computeForecastParams();
+      const s = localStorage.getItem(`forecastedBarangays_${fy}`);
+      return s ? JSON.parse(s) : [];
+    } catch { return []; }
   });
 
-  const [accumulatedChart, setAccumulatedChart] = useState(() => {
-    try { const s = localStorage.getItem('cachedChartData'); return s ? JSON.parse(s) : {}; }
-    catch { return {}; }
-  });
-
+  const [accumulatedChart, setAccumulatedChart] = useState({});
   const [genOverlay, setGenOverlay] = useState({
     visible: false, progress: 0, total: 0, current: null, completed: [], failed: [],
   });
-
   const [navBlockDialog, setNavBlockDialog] = useState(false);
   const pendingNavRef   = useRef(null);
   const isGeneratingRef = useRef(false);
 
   const cityLabel = localStorage.getItem('datasetCity') || '';
 
-  const { forecastMonths, referenceDate } = computeForecastParams();
-
-  const realNow          = new Date();
-  const realCurrentMonth = new Date(realNow.getFullYear(), realNow.getMonth(), 1);
-  const realNextMonth    = new Date(realNow.getFullYear(), realNow.getMonth() + 1, 1);
-  const realCurrentKey   = `${realCurrentMonth.getFullYear()}-${String(realCurrentMonth.getMonth() + 1).padStart(2, '0')}`;
-  const realNextKey      = `${realNextMonth.getFullYear()}-${String(realNextMonth.getMonth() + 1).padStart(2, '0')}`;
+  const realNow           = new Date();
+  const realCurrentMonth  = new Date(realNow.getFullYear(), realNow.getMonth(), 1);
+  const realNextMonth     = new Date(realNow.getFullYear(), realNow.getMonth() + 1, 1);
+  const realCurrentKey    = `${realCurrentMonth.getFullYear()}-${String(realCurrentMonth.getMonth() + 1).padStart(2, '0')}`;
+  const realNextKey       = `${realNextMonth.getFullYear()}-${String(realNextMonth.getMonth() + 1).padStart(2, '0')}`;
   const currentMonthLabel = realCurrentMonth.toLocaleDateString('en-PH', { month: 'long', year: 'numeric' });
   const nextMonthLabel    = realNextMonth.toLocaleDateString('en-PH',    { month: 'long', year: 'numeric' });
 
   const thisMonthDate = referenceDate;
   const thisMonthKey  = `${thisMonthDate.getFullYear()}-${String(thisMonthDate.getMonth() + 1).padStart(2, '0')}`;
+
+  const isViewingHistoricalYear = selectedForecastYear !== null && selectedForecastYear !== forecastYear;
 
   useEffect(() => { isGeneratingRef.current = forecastLoading; }, [forecastLoading]);
 
@@ -801,10 +727,9 @@ const Dashboard = ({ onNavigate, onLogout }) => {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, []);
 
-  // Persist forecastedBarangays to localStorage whenever it changes
   useEffect(() => {
-    try { localStorage.setItem('forecastedBarangays', JSON.stringify(forecastedBarangays)); } catch {}
-  }, [forecastedBarangays]);
+    try { localStorage.setItem(forecastedBarangaysKey, JSON.stringify(forecastedBarangays)); } catch {}
+  }, [forecastedBarangays, forecastedBarangaysKey]);
 
   const handleNavigate = (page) => {
     if (isGeneratingRef.current) { pendingNavRef.current = page; setNavBlockDialog(true); return; }
@@ -821,13 +746,12 @@ const Dashboard = ({ onNavigate, onLogout }) => {
     onLogout?.();
   };
 
+  // ── Initial data fetch ────────────────────────────────────────────────────────
   useEffect(() => {
     const readiness = checkDatasetReadyForForecast();
     setDatasetReadiness(readiness);
 
     try {
-      const up  = localStorage.getItem('uploadedData');
-      if (up) setUploadedInfo(JSON.parse(up));
       const bar = localStorage.getItem('availableBarangays');
       if (bar) { const p = JSON.parse(bar); if (Array.isArray(p) && p.length > 0) { setAvailableBarangays(p); setHasDbData(true); } }
       const dis = localStorage.getItem('diseaseColumns');
@@ -845,6 +769,7 @@ const Dashboard = ({ onNavigate, onLogout }) => {
         });
         if (!res.ok) { setCheckingData(false); return; }
         const data = await res.json();
+
         if (data.barangays?.length > 0) {
           setAvailableBarangays(data.barangays);
           setHasDbData(true);
@@ -858,13 +783,38 @@ const Dashboard = ({ onNavigate, onLogout }) => {
 
         if (data.dataset_end_date) {
           localStorage.setItem('datasetEndDate', data.dataset_end_date);
-          const freshReadiness = checkDatasetReadyForForecast();
-          setDatasetReadiness(freshReadiness);
+          setDatasetReadiness(checkDatasetReadyForForecast());
         }
 
-        // ── Hydrate forecastedBarangays from backend if available ────────────
-        if (data.forecasted_barangays?.length > 0) {
-          setForecastedBarangays(data.forecasted_barangays);
+        // ── Load available forecast years from backend ────────────────────────
+        if (data.available_forecast_years?.length > 0) {
+          setAvailableForecastYears(data.available_forecast_years);
+          const defaultYear = data.available_forecast_years.includes(forecastYear)
+            ? forecastYear
+            : data.available_forecast_years[0];
+          setSelectedForecastYear(defaultYear);
+        } else {
+          setSelectedForecastYear(forecastYear);
+        }
+
+        // ── Hydrate forecastedBarangays — ONLY for the current forecast year ──
+        // If backend returns a different forecast_year (old data), reset so all
+        // barangays are selectable for the new year
+        if (data.forecast_year !== null && data.forecast_year !== undefined) {
+          const backendFY  = data.forecast_year;
+          const { forecastYear: currentFY } = computeForecastParams();
+
+          if (backendFY === currentFY) {
+            // Same year — hydrate from backend (source of truth)
+            setForecastedBarangays(data.forecasted_barangays || []);
+          } else {
+            // New year detected — all barangays are now selectable
+            setForecastedBarangays([]);
+            // Clear the old year's localStorage key too
+            try { localStorage.removeItem(`forecastedBarangays_${backendFY}`); } catch {}
+          }
+        } else {
+          setForecastedBarangays(data.forecasted_barangays || []);
         }
 
         try {
@@ -876,19 +826,14 @@ const Dashboard = ({ onNavigate, onLogout }) => {
             if (Array.isArray(histData) && histData.length > 0) {
               const latest = histData.find(u => u.status === 'success');
               if (latest?.uploaded_at) {
-                const latestUploadTime  = new Date(latest.uploaded_at).getTime();
-                const lastForecastTime  = localStorage.getItem('lastForecastGeneratedAt')
-                  ? new Date(localStorage.getItem('lastForecastGeneratedAt')).getTime()
-                  : 0;
-                if (latestUploadTime > lastForecastTime) {
-                  setHasNewUpload(true);
-                }
+                const latestUploadTime = new Date(latest.uploaded_at).getTime();
+                const lastForecastTime = localStorage.getItem('lastForecastGeneratedAt')
+                  ? new Date(localStorage.getItem('lastForecastGeneratedAt')).getTime() : 0;
+                if (latestUploadTime > lastForecastTime) setHasNewUpload(true);
               }
             }
           }
-        } catch (e) {
-          console.error('Failed to fetch upload history:', e);
-        }
+        } catch (e) { console.error('Failed to fetch upload history:', e); }
 
         setHasSavedForecasts(data.has_saved_forecasts || false);
         if (data.has_saved_forecasts) {
@@ -915,47 +860,36 @@ const Dashboard = ({ onNavigate, onLogout }) => {
 
   useEffect(() => { if (selectedBarangay) localStorage.setItem('cachedForecastBarangay', selectedBarangay); }, [selectedBarangay]);
   useEffect(() => { localStorage.setItem('cachedForecastDisease', selectedDisease); }, [selectedDisease]);
-  useEffect(() => {
-    if (forecastData) { try { localStorage.setItem('cachedForecastData', JSON.stringify(forecastData)); } catch {} }
-  }, [forecastData]);
-  useEffect(() => {
-    try { localStorage.setItem('cachedChartData', JSON.stringify(accumulatedChart)); } catch {}
-  }, [accumulatedChart]);
 
+  // ── Load forecast when barangay OR selected year changes ─────────────────────
   useEffect(() => {
-    if (!hasDbData) return;
+    if (!hasDbData || selectedForecastYear === null) return;
     const city = localStorage.getItem('datasetCity') || '';
     setFetchingForecast(true);
     setForecastError('');
-    getSavedForecast(selectedBarangay, city)
+
+    const token = localStorage.getItem('token');
+    const yearParam = selectedForecastYear !== forecastYear ? `&forecast_year=${selectedForecastYear}` : '';
+    const url = `${API_BASE_URL}/forecast-saved?barangay=${encodeURIComponent(selectedBarangay)}&city=${encodeURIComponent(city)}${yearParam}`;
+
+    fetch(url, { headers: { 'Authorization': `Bearer ${token}` } })
+      .then(r => r.json())
       .then(result => {
-        if (result) {
+        if (!result.not_found) {
           setForecastData(result);
           setForecastIsValid(isForecastValid(result.forecast_dates));
-          const diseases = result.disease_columns || Object.keys(result.predictions || {});
-          setAccumulatedChart(prev => {
-            const updated = { ...prev };
-            (result.forecast_dates || []).forEach((date, i) => {
-              const month = date.slice(0, 7);
-              if (!(month in updated)) {
-                let total = 0;
-                diseases.forEach(d => { total += (result.predictions[d] || [])[i] || 0; });
-                updated[month] = Math.round(total);
-              }
-            });
-            return updated;
-          });
+        } else {
+          setForecastData(null);
         }
       })
       .catch(() => {})
       .finally(() => setFetchingForecast(false));
-  }, [selectedBarangay, hasDbData]);
+  }, [selectedBarangay, hasDbData, selectedForecastYear]);
 
   const computeInsights = (history) => {
     if (!history?.length) return;
     const periods = history.map(h => h.period).filter(Boolean).sort();
     const latest  = periods[periods.length - 1] || 'N/A';
-    setLatestForecastMonth(latest);
     setTotalForecasted(history.filter(h => h.period === latest).reduce((s, h) => s + (h.predictedValue || 0), 0));
     const dMap = {};
     history.forEach(item => {
@@ -976,35 +910,24 @@ const Dashboard = ({ onNavigate, onLogout }) => {
 
   const getSummaryStats = () => {
     if (!forecastData || activeDiseases.length === 0) return null;
-    const dates    = forecastData.forecast_dates || [];
+    const dates = forecastData.forecast_dates || [];
     if (dates.length === 0) return null;
     const dateKeys = dates.map(d => d.slice(0, 7));
     let currentIdx = dateKeys.indexOf(realCurrentKey);
-    if (currentIdx < 0) {
-      currentIdx = realCurrentKey < dateKeys[0] ? 0 : dateKeys.length - 1;
-    }
+    if (currentIdx < 0) currentIdx = realCurrentKey < dateKeys[0] ? 0 : dateKeys.length - 1;
     const nextIdx = Math.min(currentIdx + 1, dates.length - 1);
     const getValueAt = (idx, disease) => {
       if (idx < 0 || idx >= dates.length) return 0;
       return (forecastData.predictions[disease] || [])[idx] ?? 0;
     };
-    const sumAt = (idx) => {
-      if (idx < 0 || idx >= dates.length) return 0;
-      return activeDiseases.reduce((s, d) => s + getValueAt(idx, d), 0);
-    };
-    let currentVal, nextVal;
-    if (selectedDisease === 'all') {
-      currentVal = Math.round(sumAt(currentIdx));
-      nextVal    = Math.round(sumAt(nextIdx));
-    } else {
-      currentVal = Math.round(getValueAt(currentIdx, selectedDisease));
-      nextVal    = Math.round(getValueAt(nextIdx, selectedDisease));
-    }
-    const diff       = nextVal - currentVal;
-    const pct        = (diff / (currentVal || 1)) * 100;
-    const trend      = diff > 0.5 ? 'increasing' : diff < -0.5 ? 'decreasing' : 'stable';
+    const sumAt = (idx) => activeDiseases.reduce((s, d) => s + getValueAt(idx, d), 0);
+    const currentVal = Math.round(selectedDisease === 'all' ? sumAt(currentIdx) : getValueAt(currentIdx, selectedDisease));
+    const nextVal    = Math.round(selectedDisease === 'all' ? sumAt(nextIdx)    : getValueAt(nextIdx,    selectedDisease));
+    const diff = nextVal - currentVal;
+    const pct  = (diff / (currentVal || 1)) * 100;
     return {
-      currentVal, nextVal, trend,
+      currentVal, nextVal,
+      trend: diff > 0.5 ? 'increasing' : diff < -0.5 ? 'decreasing' : 'stable',
       pct: (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%',
       periodLabel: dates.length ? `${dateKeys[0]} – ${dateKeys[dateKeys.length - 1]}` : '',
       currentMonthFound: dateKeys[currentIdx],
@@ -1030,10 +953,9 @@ const Dashboard = ({ onNavigate, onLogout }) => {
         if (histIdx >= 0) {
           let val = 0;
           if (selectedDisease === 'all') {
-            activeDiseases.forEach(d => { const series = historical[d] || []; val += series[histIdx] || 0; });
+            activeDiseases.forEach(d => { val += (historical[d] || [])[histIdx] || 0; });
           } else {
-            const series = historical[selectedDisease] || [];
-            val = series[histIdx] || 0;
+            val = (historical[selectedDisease] || [])[histIdx] || 0;
           }
           actualValue = Math.round(val);
         }
@@ -1070,37 +992,29 @@ const Dashboard = ({ onNavigate, onLogout }) => {
     return items;
   };
 
-const handleGenerateClick = () => {
-  if (!hasDbData || availableBarangays.length === 0) {
-    setForecastError('No dataset found. Please upload in Data Import first.');
-    return;
-  }
-
-  if (datasetReadiness && !datasetReadiness.ready && datasetReadiness.reason === 'incomplete_year') {
-    setForecastError(
-      `Cannot generate forecast yet. Your dataset ends in ${datasetReadiness.endMonth} ${datasetReadiness.endYear}. ` +
-      `Please upload data through December ${datasetReadiness.endYear} first.`
-    );
-    return;
-  }
-
-  // Go directly to barangay selection — no confirm dialog needed
-  // The dialog already shows which barangays are forecasted (locked)
-  setShowBarangaySelect(true);
-};
-
-
+  const handleGenerateClick = () => {
+    if (!hasDbData || availableBarangays.length === 0) {
+      setForecastError('No dataset found. Please upload in Data Import first.');
+      return;
+    }
+    if (datasetReadiness && !datasetReadiness.ready && datasetReadiness.reason === 'incomplete_year') {
+      setForecastError(
+        `Cannot generate forecast yet. Your dataset ends in ${datasetReadiness.endMonth} ${datasetReadiness.endYear}. ` +
+        `Please upload data through December ${datasetReadiness.endYear} first.`
+      );
+      return;
+    }
+    setShowBarangaySelect(true);
+  };
 
   const handleBarangaySelectConfirm = (selectedBrgy) => {
     setShowBarangaySelect(false);
-    runGenerate(selectedBrgy);
+    if (selectedBrgy.length > 0) runGenerate(selectedBrgy);
   };
 
   const runGenerate = async (barangaysToGenerate) => {
     setForecastLoading(true);
     setForecastError('');
-    setAccumulatedChart({});
-    localStorage.removeItem('cachedChartData');
 
     const total = barangaysToGenerate.length;
     setGenOverlay({ visible: true, progress: 0, total, current: null, completed: [], failed: [] });
@@ -1134,30 +1048,30 @@ const handleGenerateClick = () => {
       localStorage.setItem('lastForecastGeneratedAt', new Date().toISOString());
       setGenerateAllProgress({ completed: completedList.length, total });
 
-      // ── NEW: merge newly completed barangays into forecastedBarangays ────────
+      // Lock completed barangays for this forecast year — they cannot be re-selected
       if (completedList.length > 0) {
-        setForecastedBarangays(prev => {
-          const merged = Array.from(new Set([...prev, ...completedList]));
-          return merged;
-        });
+        setForecastedBarangays(prev => Array.from(new Set([...prev, ...completedList])));
       }
 
-      const saved = await getSavedForecast(selectedBarangay, city);
-      if (saved) {
+      // Update available forecast years list to include current forecastYear
+      setAvailableForecastYears(prev => {
+        const updated = Array.from(new Set([forecastYear, ...prev])).sort((a, b) => b - a);
+        return updated;
+      });
+      // Switch view to the newly generated year
+      setSelectedForecastYear(forecastYear);
+
+      // Reload forecast data for current selection
+      const saved = await fetch(
+        `${API_BASE_URL}/forecast-saved?barangay=${encodeURIComponent(selectedBarangay)}&city=${encodeURIComponent(localStorage.getItem('datasetCity') || '')}`,
+        { headers: { 'Authorization': `Bearer ${token}` } }
+      ).then(r => r.json()).catch(() => null);
+
+      if (saved && !saved.not_found) {
         setForecastData(saved);
         setForecastIsValid(isForecastValid(saved.forecast_dates));
-        const diseases = saved.disease_columns || Object.keys(saved.predictions || {});
-        setAccumulatedChart(() => {
-          const updated = {};
-          (saved.forecast_dates || []).forEach((date, idx) => {
-            const month = date.slice(0, 7);
-            let total = 0;
-            diseases.forEach(d => { total += (saved.predictions[d] || [])[idx] || 0; });
-            updated[month] = Math.round(total);
-          });
-          return updated;
-        });
       }
+
       if (failedList.length > 0)
         setForecastError(`Done! ${completedList.length}/${total} barangays completed. ${failedList.length} failed.`);
     } catch (err) {
@@ -1175,7 +1089,6 @@ const handleGenerateClick = () => {
   const stats      = getSummaryStats();
   const chartData  = buildChartData();
   const trendItems = buildTrendSummary();
-  const totalThisMonth = forecastHistory.filter(h => h.period === realCurrentKey).reduce((s, h) => s + (h.predictedValue || 0), 0);
   const chartColor = selectedDisease !== 'all' && CATEGORY_MAP[selectedDisease]
     ? CATEGORY_MAP[selectedDisease].color : T.blue;
 
@@ -1207,7 +1120,6 @@ const handleGenerateClick = () => {
 
       <NavigationBlockDialog open={navBlockDialog} onStay={handleNavBlockStay} onLeave={handleNavBlockLeave} />
 
-      {/* Barangay selection dialog — passes forecastedBarangays to lock already-done barangays */}
       <BarangaySelectDialog
         open={showBarangaySelect}
         allBarangays={availableBarangays}
@@ -1281,19 +1193,14 @@ const handleGenerateClick = () => {
                     ))}
                   </Select>
                 </Box>
-                <Tooltip
-                  title={datasetNotReady
-                    ? `Dataset must end in December ${datasetReadiness?.endYear} before forecasting`
-                    : ''}
-                  arrow>
+                <Tooltip title={datasetNotReady ? `Dataset must end in December ${datasetReadiness?.endYear} before forecasting` : ''} arrow>
                   <span style={{ marginLeft: 'auto' }}>
                     <Button variant="contained" onClick={handleGenerateClick}
                       disabled={buttonDisabled}
                       startIcon={forecastLoading
                         ? <CircularProgress size={13} color="inherit" />
-                        : datasetNotReady
-                          ? <LockIcon sx={{ fontSize: 15 }} />
-                          : <PsychologyIcon sx={{ fontSize: 15 }} />}
+                        : datasetNotReady ? <LockIcon sx={{ fontSize: 15 }} />
+                        : <PsychologyIcon sx={{ fontSize: 15 }} />}
                       sx={{ textTransform: 'none', fontWeight: 600, fontSize: 13, borderRadius: '8px',
                         px: 2.5, py: '7px', backgroundColor: T.blue, color: '#fff',
                         boxShadow: '0 2px 8px rgba(37,99,235,0.2)',
@@ -1304,7 +1211,6 @@ const handleGenerateClick = () => {
                 </Tooltip>
               </Box>
               <Box sx={{ mt: 1.5, px: '2px' }}>
-               
                 {!hasNewUpload && !hasSavedForecasts && hasDbData && !datasetNotReady && (
                   <Typography sx={{ fontSize: 11.5, color: T.textMuted }}>
                     💡 Click <strong>Generate</strong> to train {forecastMonths}-month forecasts
@@ -1317,18 +1223,28 @@ const handleGenerateClick = () => {
                     ✅ Saved forecasts available — switching barangays loads instantly.
                   </Typography>
                 )}
+                {/* Show how many remaining barangays can still be forecasted this year */}
+                {hasSavedForecasts && !datasetNotReady && (() => {
+                  const remaining = availableBarangays.filter(b => !forecastedBarangays.includes(b)).length;
+                  if (remaining > 0 && remaining < availableBarangays.length) {
+                    return (
+                      <Typography sx={{ fontSize: 11.5, color: T.textMuted, mt: 0.5 }}>
+                        📋 <strong>{forecastedBarangays.length}</strong> of <strong>{availableBarangays.length}</strong> barangays forecasted for {forecastYear}. {remaining} remaining.
+                      </Typography>
+                    );
+                  }
+                  return null;
+                })()}
               </Box>
             </CardContent>
           </SCard>
-
-
 
           {fetchingForecast && !forecastLoading && (
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 2, py: 1.25, mb: '14px',
               borderRadius: '8px', backgroundColor: T.blueDim, border: `1px solid rgba(37,99,235,0.18)` }}>
               <CircularProgress size={12} sx={{ color: T.blue }} />
               <Typography sx={{ fontSize: 12.5, color: T.textBody }}>
-                Loading forecast for <strong>{selectedBarangay === ALL_BARANGAYS ? 'All Barangays' : selectedBarangay}</strong>…
+                Loading {selectedForecastYear} forecast for <strong>{selectedBarangay === ALL_BARANGAYS ? 'All Barangays' : selectedBarangay}</strong>…
               </Typography>
             </Box>
           )}
@@ -1350,14 +1266,24 @@ const handleGenerateClick = () => {
             </Box>
           )}
 
-          {forecastData && !fetchingForecast && (
+          {/* Historical year view notice */}
+          {isViewingHistoricalYear && forecastData && !fetchingForecast && (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 2, py: 1.25, mb: '14px',
+              borderRadius: '8px', backgroundColor: T.warnBg, border: `1px solid ${T.warnBorder}` }}>
+              <HistoryIcon sx={{ fontSize: 14, color: T.warn }} />
+              <Typography sx={{ fontSize: 12.5, color: T.textBody }}>
+                Viewing <strong>{selectedForecastYear}</strong> forecast data — this is a past forecast year.
+              </Typography>
+            </Box>
+          )}
+
+          {forecastData && !fetchingForecast && !isViewingHistoricalYear && (
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 2, py: 1.25, mb: '14px',
               borderRadius: '8px', backgroundColor: T.okBg, border: `1px solid ${T.okBorder}` }}>
               <CheckCircleIcon sx={{ fontSize: 14, color: T.ok }} />
               <Typography sx={{ fontSize: 12.5, color: T.textBody }}>
                 Showing forecast for <strong>{selectedBarangay === ALL_BARANGAYS ? 'All Barangays' : selectedBarangay}</strong>
                 {selectedDisease !== 'all' ? ` — ${getDiseaseInfo(selectedDisease).label}` : ''}
-                {forecastData.is_saved ? ' — loaded from saved results' : ''}
               </Typography>
             </Box>
           )}
@@ -1386,7 +1312,7 @@ const handleGenerateClick = () => {
                   </Box>
                 </Box>
                 <Typography sx={{ fontSize: 26, fontWeight: 700, color: T.textHead, lineHeight: 1, letterSpacing: '-0.5px' }}>
-                  {stats ? stats.currentVal.toLocaleString() : hasData ? totalThisMonth.toLocaleString() : '—'}
+                  {stats ? stats.currentVal.toLocaleString() : hasData ? totalForecasted.toLocaleString() : '—'}
                 </Typography>
                 <Typography sx={{ fontSize: 10.5, color: T.textFaint, mt: 0.25 }}>{currentMonthLabel}</Typography>
                 {stats && stats.currentMonthFound !== realCurrentKey && (
@@ -1406,7 +1332,7 @@ const handleGenerateClick = () => {
                   </Box>
                 </Box>
                 <Typography sx={{ fontSize: 26, fontWeight: 700, color: T.textHead, lineHeight: 1, letterSpacing: '-0.5px' }}>
-                  {stats ? stats.nextVal.toLocaleString() : hasData ? totalForecasted.toLocaleString() : '—'}
+                  {stats ? stats.nextVal.toLocaleString() : '—'}
                 </Typography>
                 <Typography sx={{ fontSize: 10.5, color: T.textFaint, mt: 0.25 }}>{nextMonthLabel}</Typography>
                 {stats && stats.nextMonthFound !== realNextKey && (
@@ -1436,19 +1362,52 @@ const handleGenerateClick = () => {
             </SCard>
           </Box>
 
-          {/* Chart */}
+          {/* Chart — with Year Selector */}
           <SCard sx={{ mb: '14px' }}>
             <CardContent sx={{ p: '18px 20px 14px', '&:last-child': { pb: '14px' } }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2, gap: 1, flexWrap: 'wrap' }}>
                 <Typography sx={{ fontSize: 13, fontWeight: 600, color: T.textHead }}>Predicted Patient Volume</Typography>
-                {selectedDisease !== 'all' && (
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, px: '10px', py: '3px', borderRadius: '20px',
-                    backgroundColor: `${chartColor}18`, border: `1px solid ${chartColor}40` }}>
-                    <Box sx={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: chartColor }} />
-                    <Typography sx={{ fontSize: 11.5, fontWeight: 600, color: chartColor }}>{getDiseaseInfo(selectedDisease).label}</Typography>
-                  </Box>
-                )}
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  {/* ── Year Selector — always visible when there are multiple years ── */}
+                  {availableForecastYears.length > 1 && (
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                      <HistoryIcon sx={{ fontSize: 14, color: T.textMuted }} />
+                      <Typography sx={{ fontSize: 11.5, color: T.textMuted, fontWeight: 500 }}>Year:</Typography>
+                      <Select
+                        value={selectedForecastYear || ''}
+                        size="small"
+                        onChange={(e) => setSelectedForecastYear(Number(e.target.value))}
+                        sx={{ ...SelectSx, minWidth: 90, fontSize: 12,
+                          '& .MuiSelect-select': { py: '4px', px: '10px' } }}>
+                        {availableForecastYears.map(yr => (
+                          <MenuItemComponent key={yr} value={yr} sx={{ fontSize: 12 }}>
+                            {yr}{yr === forecastYear ? ' (latest)' : ' (past)'}
+                          </MenuItemComponent>
+                        ))}
+                      </Select>
+                    </Box>
+                  )}
+                  {selectedDisease !== 'all' && (
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, px: '10px', py: '3px', borderRadius: '20px',
+                      backgroundColor: `${chartColor}18`, border: `1px solid ${chartColor}40` }}>
+                      <Box sx={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: chartColor }} />
+                      <Typography sx={{ fontSize: 11.5, fontWeight: 600, color: chartColor }}>{getDiseaseInfo(selectedDisease).label}</Typography>
+                    </Box>
+                  )}
+                </Box>
               </Box>
+
+              {/* Historical year warning banner inside chart */}
+              {isViewingHistoricalYear && (
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, p: '7px 12px', mb: 1.5,
+                  borderRadius: '7px', backgroundColor: '#FFFBEB', border: '1px solid #FDE68A' }}>
+                  <HistoryIcon sx={{ fontSize: 13, color: '#D97706' }} />
+                  <Typography sx={{ fontSize: 11.5, color: '#92400E' }}>
+                    Viewing archived <strong>{selectedForecastYear}</strong> forecast — these results are from a previous generation run.
+                  </Typography>
+                </Box>
+              )}
+
               {chartData.length > 0 ? (
                 <ResponsiveContainer width="100%" height={220}>
                   <LineChart data={chartData} margin={{ top: 8, right: 12, left: -14, bottom: 0 }}>
@@ -1457,8 +1416,7 @@ const handleGenerateClick = () => {
                     <YAxis axisLine={false} tickLine={false} style={{ fontSize: 10.5, fill: T.textFaint }} />
                     <RechartsTooltip contentStyle={tooltipStyle} />
                     <Line type="monotone" dataKey="actual" name="Actual" stroke={chartColor}
-                      strokeWidth={2} strokeDasharray="0"
-                      dot={{ fill: chartColor, r: 3, strokeWidth: 0 }}
+                      strokeWidth={2} dot={{ fill: chartColor, r: 3, strokeWidth: 0 }}
                       activeDot={{ r: 4, fill: chartColor, stroke: '#fff', strokeWidth: 2 }}
                       connectNulls={false} />
                     <Line type="monotone" dataKey="predicted" name="Predicted" stroke={chartColor}
@@ -1492,7 +1450,15 @@ const handleGenerateClick = () => {
           <SCard>
             <CardContent sx={{ p: '18px 20px', '&:last-child': { pb: '20px' } }}>
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1.75 }}>
-                <Typography sx={{ fontSize: 13, fontWeight: 600, color: T.textHead }}>Results</Typography>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <Typography sx={{ fontSize: 13, fontWeight: 600, color: T.textHead }}>Results</Typography>
+                  {isViewingHistoricalYear && (
+                    <Box sx={{ px: '8px', py: '2px', borderRadius: '20px',
+                      backgroundColor: T.warnBg, border: `1px solid ${T.warnBorder}` }}>
+                      <Typography sx={{ fontSize: 10.5, color: T.warn, fontWeight: 600 }}>{selectedForecastYear}</Typography>
+                    </Box>
+                  )}
+                </Box>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                   <Typography sx={{ fontSize: 11.5, color: T.textMuted }}>
                     {selectedDisease === 'all' ? 'All Categories' : getDiseaseInfo(selectedDisease).label}
