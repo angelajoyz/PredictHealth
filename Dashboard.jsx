@@ -837,11 +837,13 @@ const Dashboard = ({ onNavigate, onLogout }) => {
   useEffect(() => { localStorage.setItem('cachedForecastDisease', selectedDisease); }, [selectedDisease]);
 
   // ── Load forecast when barangay OR selected year changes ─────────────────────
+  // FIX: Reset forecastData BEFORE fetching to avoid stale data display
   useEffect(() => {
     if (!hasDbData || selectedForecastYear === null) return;
     const city = localStorage.getItem('datasetCity') || '';
     setFetchingForecast(true);
     setForecastError('');
+    setForecastData(null); // 🔑 CRITICAL: Reset forecast data BEFORE fetching new year
 
     const token = localStorage.getItem('token');
     const yearParam = selectedForecastYear !== forecastYear ? `&forecast_year=${selectedForecastYear}` : '';
@@ -857,7 +859,7 @@ const Dashboard = ({ onNavigate, onLogout }) => {
           setForecastData(null);
         }
       })
-      .catch(() => {})
+      .catch(() => { setForecastData(null); }) // 🔑 Also reset on error
       .finally(() => setFetchingForecast(false));
   }, [selectedBarangay, hasDbData, selectedForecastYear]);
 
