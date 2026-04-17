@@ -830,20 +830,19 @@ def forecast_all():
 @app.route('/api/forecast-saved', methods=['GET'])
 @jwt_required()
 def get_saved_forecast():
-    barangay     = request.args.get('barangay', '').strip()
-    city         = request.args.get('city', '').strip()
-    # Optional: filter by forecast year (e.g. "2024" or "2025")
+    from sqlalchemy import func as sqlfunc
+    barangay      = request.args.get('barangay', '').strip()
+    city          = request.args.get('city', '').strip()
     forecast_year = request.args.get('forecast_year', '').strip()
-
+ 
     if not barangay:
         return jsonify({'error': 'barangay is required'}), 400
-
+ 
     try:
         if barangay == '__ALL__':
             result = get_all_saved_forecast_dict(city=city or None, forecast_year=forecast_year or None)
             if not result:
                 return jsonify({'error': 'No saved forecasts found.', 'not_found': True}), 404
-            return jsonify(result), 200
         else:
             result = get_saved_forecast_dict(barangay=barangay, city=city or None, forecast_year=forecast_year or None)
             if not result:
@@ -851,8 +850,70 @@ def get_saved_forecast():
                     'error': f'No saved forecast for {barangay}. Please run Generate first.',
                     'not_found': True,
                 }), 404
-            return jsonify(result), 200
-
+ 
+        # ── Attach actual BarangayData for the forecast year ──────────────
+        # This lets the frontend render real bars (actual) overlaid on the
+        # dashed prediction line for months that have been uploaded.
+        fc_dates = result.get('forecast_dates', [])
+        if fc_dates:
+            year_str = fc_dates[0][:4]
+            try:
+                fc_year = int(year_str)
+            except Exception:
+                fc_year = None
+ 
+            if fc_year:
+                q = db.session.query(
+                    BarangayData.year,
+                    BarangayData.month,
+                    BarangayData.disease_category,
+                    sqlfunc.sum(BarangayData.total_cases).label('total'),
+                ).filter(BarangayData.year == fc_year)
+ 
+                if barangay != '__ALL__':
+                    q = q.filter(BarangayData.barangay.ilike(barangay))
+                if city:
+                    q = q.filter(BarangayData.city.ilike(f'%{city}%'))
+ 
+                q = q.group_by(
+                    BarangayData.year,
+                    BarangayData.month,
+                    BarangayData.disease_category,
+                ).order_by(BarangayData.year, BarangayData.month)
+ 
+                rows = q.all()
+ 
+                # period -> { 'disease_cases': value }
+                actual_map = {}
+                for r in rows:
+                    period = f"{r.year}-{str(r.month).zfill(2)}"
+                    col = f"{r.disease_category}_cases"
+                    if period not in actual_map:
+                        actual_map[period] = {}
+                    actual_map[period][col] = float(r.total or 0)
+ 
+                # Build actual_data aligned to forecast_dates
+                # Use disease_columns from result (or derive from predictions keys)
+                diseases = result.get('disease_columns', list(result.get('predictions', {}).keys()))
+ 
+                # actual_data mirrors the shape of historical_data:
+                # { 'dates': [...], 'disease_col': [...], ... }
+                # Values are None for months with no uploaded data yet
+                actual_data = {'dates': fc_dates}
+                for d in diseases:
+                    vals = []
+                    for period in fc_dates:
+                        if period in actual_map:
+                            val = actual_map[period].get(d, None)
+                            vals.append(val)
+                        else:
+                            vals.append(None)  # No data uploaded for this month
+                    actual_data[d] = vals
+ 
+                result['actual_data'] = actual_data
+ 
+        return jsonify(result), 200
+ 
     except Exception as e:
         import traceback
         print(traceback.format_exc())

@@ -23,7 +23,7 @@ import {
   History as HistoryIcon,
 } from '@mui/icons-material';
 import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid,
+  ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid,
   Tooltip as RechartsTooltip, ResponsiveContainer,
 } from 'recharts';
 import Sidebar, { T } from './Sidebar';
@@ -152,8 +152,6 @@ const TrendRowIcon = ({ type }) => {
 };
 
 // ── Barangay Selection Dialog ─────────────────────────────────────────────────
-// KEY CHANGE: forecasted barangays are FULLY LOCKED — cannot be selected at all.
-// They can only be selected again once a new dataset year is uploaded.
 const BarangaySelectDialog = ({
   open, allBarangays, forecastedBarangays = [], forecastMonths, referenceDate, onConfirm, onCancel,
 }) => {
@@ -161,7 +159,6 @@ const BarangaySelectDialog = ({
   const decYear    = referenceDate ? referenceDate.getFullYear() : new Date().getFullYear();
   const startLabel = referenceDate ? referenceDate.toLocaleDateString('en-PH', { month: 'long' }) : '—';
 
-  // Only barangays NOT yet forecasted this year are selectable
   const selectableBarangays = allBarangays.filter(b => !forecastedBarangays.includes(b));
   const lockedCount = forecastedBarangays.length;
   const allDone = selectableBarangays.length === 0;
@@ -169,7 +166,6 @@ const BarangaySelectDialog = ({
   useEffect(() => { if (open) setSelected([]); }, [open]);
 
   const toggle = (brgy) => {
-    // Double-guard: never allow toggling a forecasted barangay
     if (forecastedBarangays.includes(brgy)) return;
     setSelected(prev =>
       prev.includes(brgy) ? prev.filter(b => b !== brgy)
@@ -200,18 +196,14 @@ const BarangaySelectDialog = ({
       <Box sx={{ borderBottom: `1px solid ${T.borderSoft}`, mx: 3 }} />
 
       <DialogContent sx={{ pt: 2, pb: 1 }}>
-
-        {/* Info banner */}
         <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, p: '9px 12px', mb: 2,
           borderRadius: '8px', backgroundColor: T.blueDim, border: `1px solid rgba(37,99,235,0.18)` }}>
           <InfoOutlinedIcon sx={{ fontSize: 14, color: T.blue, flexShrink: 0, mt: '1px' }} />
           <Typography sx={{ fontSize: 12, color: T.textBody }}>
             Select <strong>up to {MAX_BARANGAY_SELECTION} barangays</strong> to generate {decYear} forecasts.
-            
           </Typography>
         </Box>
 
-        {/* All done notice */}
         {allDone && (
           <Box sx={{ p: '10px 14px', mb: 2, borderRadius: '8px',
             backgroundColor: T.okBg, border: `1px solid ${T.okBorder}` }}>
@@ -221,11 +213,9 @@ const BarangaySelectDialog = ({
                 All {lockedCount} barangays already have {decYear} forecasts.
               </Typography>
             </Box>
-            
           </Box>
         )}
 
-        {/* Selected chips */}
         {selected.length > 0 && (
           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75, mb: 1.5 }}>
             {selected.map(b => (
@@ -258,7 +248,6 @@ const BarangaySelectDialog = ({
           {allBarangays.map((brgy, idx) => {
             const isForecasted = forecastedBarangays.includes(brgy);
             const isChecked    = selected.includes(brgy);
-            // Locked if: already forecasted this year OR at limit and not selected
             const isLocked     = isForecasted || (atLimit && !isChecked);
 
             return (
@@ -268,7 +257,6 @@ const BarangaySelectDialog = ({
                   px: 2, py: 1.1,
                   borderBottom: idx < allBarangays.length - 1 ? `1px solid ${T.borderSoft}` : 'none',
                   cursor: isLocked ? 'not-allowed' : 'pointer',
-                  // Forecasted = distinct locked style; limit = lighter dim
                   backgroundColor: isForecasted
                     ? '#F8FFF8'
                     : isChecked ? T.blueDim : 'transparent',
@@ -277,7 +265,6 @@ const BarangaySelectDialog = ({
                   '&:hover': (!isLocked) ? { backgroundColor: isChecked ? T.blueDim : T.pageBg } : {},
                 }}>
 
-                {/* Checkbox — hidden/replaced for forecasted, shown normally for others */}
                 {isForecasted ? (
                   <CheckCircleIcon sx={{ fontSize: 18, color: T.ok, flexShrink: 0 }} />
                 ) : (
@@ -295,17 +282,14 @@ const BarangaySelectDialog = ({
                   {brgy}
                 </Typography>
 
-                {/* Done badge for forecasted */}
                 {isForecasted && (
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.4,
                     px: '8px', py: '2px', borderRadius: '20px',
                     backgroundColor: T.okBg, border: `1px solid ${T.okBorder}`, flexShrink: 0 }}>
-                    
                     <Typography sx={{ fontSize: 10.5, color: T.ok, fontWeight: 600 }}>Done</Typography>
                   </Box>
                 )}
 
-                {/* Lock icon for limit-reached-but-not-forecasted */}
                 {!isForecasted && atLimit && !isChecked && (
                   <LockIcon sx={{ fontSize: 12, color: T.textFaint, ml: 'auto' }} />
                 )}
@@ -615,7 +599,7 @@ const ResultRow = ({ item, forecastData, selectedBarangay }) => {
                     Historical trend — {breakdown.breakdown[0]?.label}
                   </Typography>
                   <ResponsiveContainer width="100%" height={80}>
-                    <LineChart data={breakdown.monthly_trend} margin={{ top: 4, right: 4, left: -32, bottom: 0 }}>
+                    <ComposedChart data={breakdown.monthly_trend} margin={{ top: 4, right: 4, left: -32, bottom: 0 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke={T.borderSoft} vertical={false} />
                       <XAxis dataKey="period" axisLine={false} tickLine={false}
                         tick={{ fontSize: 9, fill: T.textFaint }} tickFormatter={v => v.slice(5)} />
@@ -623,7 +607,7 @@ const ResultRow = ({ item, forecastData, selectedBarangay }) => {
                       <RechartsTooltip contentStyle={{ ...tooltipStyle, fontSize: 11 }} />
                       <Line type="monotone" dataKey="cases" stroke={info?.color || T.blue}
                         strokeWidth={2} dot={false} activeDot={{ r: 3, fill: info?.color || T.blue }} />
-                    </LineChart>
+                    </ComposedChart>
                   </ResponsiveContainer>
                 </Box>
               )}
@@ -675,11 +659,9 @@ const Dashboard = ({ onNavigate, onLogout }) => {
   const [hasNewUpload,        setHasNewUpload]       = useState(false);
   const [datasetReadiness,    setDatasetReadiness]   = useState(null);
 
-  // ── Year selector state ───────────────────────────────────────────────────────
   const [availableForecastYears, setAvailableForecastYears] = useState([]);
   const [selectedForecastYear,   setSelectedForecastYear]   = useState(null);
 
-  // ── forecastedBarangays keyed by forecast year ────────────────────────────────
   const { forecastMonths, referenceDate, forecastYear } = computeForecastParams();
   const forecastedBarangaysKey = `forecastedBarangays_${forecastYear}`;
 
@@ -786,7 +768,6 @@ const Dashboard = ({ onNavigate, onLogout }) => {
           setDatasetReadiness(checkDatasetReadyForForecast());
         }
 
-        // ── Load available forecast years from backend ────────────────────────
         if (data.available_forecast_years?.length > 0) {
           setAvailableForecastYears(data.available_forecast_years);
           const defaultYear = data.available_forecast_years.includes(forecastYear)
@@ -797,20 +778,14 @@ const Dashboard = ({ onNavigate, onLogout }) => {
           setSelectedForecastYear(forecastYear);
         }
 
-        // ── Hydrate forecastedBarangays — ONLY for the current forecast year ──
-        // If backend returns a different forecast_year (old data), reset so all
-        // barangays are selectable for the new year
         if (data.forecast_year !== null && data.forecast_year !== undefined) {
           const backendFY  = data.forecast_year;
           const { forecastYear: currentFY } = computeForecastParams();
 
           if (backendFY === currentFY) {
-            // Same year — hydrate from backend (source of truth)
             setForecastedBarangays(data.forecasted_barangays || []);
           } else {
-            // New year detected — all barangays are now selectable
             setForecastedBarangays([]);
-            // Clear the old year's localStorage key too
             try { localStorage.removeItem(`forecastedBarangays_${backendFY}`); } catch {}
           }
         } else {
@@ -929,40 +904,75 @@ const Dashboard = ({ onNavigate, onLogout }) => {
       currentVal, nextVal,
       trend: diff > 0.5 ? 'increasing' : diff < -0.5 ? 'decreasing' : 'stable',
       pct: (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%',
-      periodLabel: dates.length ? `${dateKeys[0]} – ${dateKeys[dateKeys.length - 1]}` : '',
+      periodLabel: dates.length ? `${dateKeys[0]} – ${dateKeys[dates.length - 1]}` : '',
       currentMonthFound: dateKeys[currentIdx],
       nextMonthFound:    dateKeys[nextIdx],
     };
   };
 
+  // ── Build chart data: bars for actual, dashed line for predicted ──────────────
   const buildChartData = () => {
     const forecastDates = forecastData?.forecast_dates || [];
     if (forecastDates.length === 0) return [];
-    const historical = forecastData?.historical_data;
-    return forecastDates.map((fcDate, i) => {
-      const month = fcDate.slice(0, 7);
-      let forecastValue = 0;
-      if (selectedDisease === 'all') {
-        activeDiseases.forEach(d => { forecastValue += (forecastData.predictions[d] || [])[i] || 0; });
-      } else {
-        forecastValue = (forecastData.predictions[selectedDisease] || [])[i] || 0;
-      }
-      let actualValue = null;
-      if (historical?.dates) {
-        const histIdx = historical.dates.findIndex(d => d.slice(0, 7) === month);
-        if (histIdx >= 0) {
-          let val = 0;
-          if (selectedDisease === 'all') {
-            activeDiseases.forEach(d => { val += (historical[d] || [])[histIdx] || 0; });
-          } else {
-            val = (historical[selectedDisease] || [])[histIdx] || 0;
-          }
-          actualValue = Math.round(val);
+ 
+    // actual_data: new field from backend — real uploaded data for forecast year
+    // Shape: { dates: ['2025-01', ...], disease_col: [val|null, ...], ... }
+    const actualData = forecastData?.actual_data || null;
+ 
+    // Build a lookup: period -> actual aggregated value (null = not uploaded yet)
+    const actualMap = {};
+    if (actualData?.dates) {
+      actualData.dates.forEach((period, idx) => {
+        let val = null;
+ 
+        if (selectedDisease === 'all') {
+          // Sum across all active diseases for this period
+          let sum = 0;
+          let hasAny = false;
+          activeDiseases.forEach(d => {
+            const v = (actualData[d] || [])[idx];
+            if (v !== null && v !== undefined) {
+              sum += v;
+              hasAny = true;
+            }
+          });
+          val = hasAny ? sum : null;
+        } else {
+          // Single disease
+          const v = (actualData[selectedDisease] || [])[idx];
+          val = (v !== null && v !== undefined) ? v : null;
         }
+ 
+        actualMap[period] = val;
+      });
+    }
+ 
+    return forecastDates.map((fcDate, i) => {
+      const period = fcDate.slice(0, 7);
+ 
+      // Predicted value (always present)
+      let predictedValue = 0;
+      if (selectedDisease === 'all') {
+        activeDiseases.forEach(d => {
+          predictedValue += (forecastData.predictions[d] || [])[i] || 0;
+        });
+      } else {
+        predictedValue = (forecastData.predictions[selectedDisease] || [])[i] || 0;
       }
-      return { month, actual: actualValue, predicted: actualValue === null ? Math.round(forecastValue) : null };
+ 
+      // Actual value — null means bar won't render for that month
+      const actualValue = Object.prototype.hasOwnProperty.call(actualMap, period)
+        ? actualMap[period]   // could be a number OR null
+        : null;               // month not in actual_data at all
+ 
+      return {
+        month: period,
+        actual: actualValue,
+        predicted: Math.round(predictedValue),
+      };
     });
   };
+ 
 
   const buildTrendSummary = () => {
     const sourceData = forecastData
@@ -1048,20 +1058,16 @@ const Dashboard = ({ onNavigate, onLogout }) => {
       localStorage.setItem('lastForecastGeneratedAt', new Date().toISOString());
       setGenerateAllProgress({ completed: completedList.length, total });
 
-      // Lock completed barangays for this forecast year — they cannot be re-selected
       if (completedList.length > 0) {
         setForecastedBarangays(prev => Array.from(new Set([...prev, ...completedList])));
       }
 
-      // Update available forecast years list to include current forecastYear
       setAvailableForecastYears(prev => {
         const updated = Array.from(new Set([forecastYear, ...prev])).sort((a, b) => b - a);
         return updated;
       });
-      // Switch view to the newly generated year
       setSelectedForecastYear(forecastYear);
 
-      // Reload forecast data for current selection
       const saved = await fetch(
         `${API_BASE_URL}/forecast-saved?barangay=${encodeURIComponent(selectedBarangay)}&city=${encodeURIComponent(localStorage.getItem('datasetCity') || '')}`,
         { headers: { 'Authorization': `Bearer ${token}` } }
@@ -1105,6 +1111,35 @@ const Dashboard = ({ onNavigate, onLogout }) => {
   const datasetNotReady = datasetReadiness && !datasetReadiness.ready && datasetReadiness.reason === 'incomplete_year';
   const buttonDisabled  = forecastLoading || !hasDbData || datasetNotReady;
   const buttonLabel     = forecastLoading ? 'Generating…' : 'Generate';
+
+  // ── Custom tooltip for combo chart ───────────────────────────────────────────
+  const ComboTooltip = ({ active, payload, label }) => {
+    if (!active || !payload || !payload.length) return null;
+    return (
+      <Box sx={{ backgroundColor: '#FFFFFF', border: `1px solid ${T.border}`,
+        borderRadius: '8px', p: '10px 14px', boxShadow: '0 4px 12px rgba(0,0,0,0.08)' }}>
+        <Typography sx={{ fontSize: 11.5, fontWeight: 600, color: T.textHead, mb: 0.5 }}>{label}</Typography>
+        {payload.map((entry, i) => {
+          if (entry.value === null || entry.value === undefined) return null;
+          const isActual = entry.name === 'Actual';
+          return (
+            <Box key={i} sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.25 }}>
+              <Box sx={{
+                width: 10, height: 10, flexShrink: 0,
+                borderRadius: isActual ? '2px' : '50%',
+                backgroundColor: entry.color,
+                opacity: isActual ? 0.8 : 1,
+              }} />
+              <Typography sx={{ fontSize: 11.5, color: T.textMuted }}>{entry.name}:</Typography>
+              <Typography sx={{ fontSize: 11.5, fontWeight: 700, color: T.textHead }}>
+                {Math.round(entry.value).toLocaleString()}
+              </Typography>
+            </Box>
+          );
+        })}
+      </Box>
+    );
+  };
 
   return (
     <Box sx={{ display: 'flex', minHeight: '100vh', backgroundColor: T.pageBg }}>
@@ -1223,7 +1258,6 @@ const Dashboard = ({ onNavigate, onLogout }) => {
                     ✅ Saved forecasts available — switching barangays loads instantly.
                   </Typography>
                 )}
-                {/* Show how many remaining barangays can still be forecasted this year */}
                 {hasSavedForecasts && !datasetNotReady && (() => {
                   const remaining = availableBarangays.filter(b => !forecastedBarangays.includes(b)).length;
                   if (remaining > 0 && remaining < availableBarangays.length) {
@@ -1266,7 +1300,6 @@ const Dashboard = ({ onNavigate, onLogout }) => {
             </Box>
           )}
 
-          {/* Historical year view notice */}
           {isViewingHistoricalYear && forecastData && !fetchingForecast && (
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 2, py: 1.25, mb: '14px',
               borderRadius: '8px', backgroundColor: T.warnBg, border: `1px solid ${T.warnBorder}` }}>
@@ -1362,16 +1395,15 @@ const Dashboard = ({ onNavigate, onLogout }) => {
             </SCard>
           </Box>
 
-          {/* Chart — with Year Selector */}
+          {/* ── Chart Card — Combo: Bar (actual) + Dashed Line (predicted) ── */}
           <SCard sx={{ mb: '14px' }}>
             <CardContent sx={{ p: '18px 20px 14px', '&:last-child': { pb: '14px' } }}>
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2, gap: 1, flexWrap: 'wrap' }}>
                 <Typography sx={{ fontSize: 13, fontWeight: 600, color: T.textHead }}>Predicted Patient Volume</Typography>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  {/* ── Year Selector — always visible when there are multiple years ── */}
+                  {/* Year selector */}
                   {availableForecastYears.length > 1 && (
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
-                     
                       <Typography sx={{ fontSize: 11.5, color: T.textMuted, fontWeight: 500 }}>Year:</Typography>
                       <Select
                         value={selectedForecastYear || ''}
@@ -1397,7 +1429,7 @@ const Dashboard = ({ onNavigate, onLogout }) => {
                 </Box>
               </Box>
 
-              {/* Historical year warning banner inside chart */}
+              {/* Historical year warning inside chart */}
               {isViewingHistoricalYear && (
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, p: '7px 12px', mb: 1.5,
                   borderRadius: '7px', backgroundColor: '#FFFBEB', border: '1px solid #FDE68A' }}>
@@ -1410,21 +1442,38 @@ const Dashboard = ({ onNavigate, onLogout }) => {
 
               {chartData.length > 0 ? (
                 <ResponsiveContainer width="100%" height={220}>
-                  <LineChart data={chartData} margin={{ top: 8, right: 12, left: -14, bottom: 0 }}>
+                  <ComposedChart data={chartData} margin={{ top: 8, right: 12, left: -14, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke={T.borderSoft} vertical={false} />
-                    <XAxis dataKey="month" axisLine={false} tickLine={false} style={{ fontSize: 10.5, fill: T.textFaint }} />
-                    <YAxis axisLine={false} tickLine={false} style={{ fontSize: 10.5, fill: T.textFaint }} />
-                    <RechartsTooltip contentStyle={tooltipStyle} />
-                    <Line type="monotone" dataKey="actual" name="Actual" stroke={chartColor}
-                      strokeWidth={2} dot={{ fill: chartColor, r: 3, strokeWidth: 0 }}
-                      activeDot={{ r: 4, fill: chartColor, stroke: '#fff', strokeWidth: 2 }}
-                      connectNulls={false} />
-                    <Line type="monotone" dataKey="predicted" name="Predicted" stroke={chartColor}
-                      strokeWidth={2} strokeDasharray="5 3"
+                    <XAxis dataKey="month" axisLine={false} tickLine={false}
+                      style={{ fontSize: 10.5, fill: T.textFaint }} />
+                    <YAxis axisLine={false} tickLine={false}
+                      style={{ fontSize: 10.5, fill: T.textFaint }} />
+                    <RechartsTooltip content={<ComboTooltip />} />
+
+                    {/* Actual data — solid bars, only where actual !== null */}
+                    <Bar
+                      dataKey="actual"
+                      name="Actual"
+                      fill={chartColor}
+                      fillOpacity={0.80}
+                      radius={[3, 3, 0, 0]}
+                      maxBarSize={28}
+                      isAnimationActive={false}
+                    />
+
+                    {/* Predicted — dashed line across full forecast year */}
+                    <Line
+                      type="monotone"
+                      dataKey="predicted"
+                      name="Predicted"
+                      stroke={chartColor}
+                      strokeWidth={2}
+                      strokeDasharray="5 3"
                       dot={{ fill: chartColor, r: 3, strokeWidth: 0 }}
                       activeDot={{ r: 4, fill: chartColor, stroke: '#fff', strokeWidth: 2 }}
-                      connectNulls={false} />
-                  </LineChart>
+                      connectNulls
+                    />
+                  </ComposedChart>
                 </ResponsiveContainer>
               ) : (
                 <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 220 }}>
@@ -1433,13 +1482,18 @@ const Dashboard = ({ onNavigate, onLogout }) => {
                   </Typography>
                 </Box>
               )}
+
+              {/* Legend */}
               <Box sx={{ display: 'flex', justifyContent: 'center', gap: 2, mt: 1.5 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                  <Box sx={{ width: 8, height: 2, borderRadius: 1, backgroundColor: chartColor }} />
+                  <Box sx={{ width: 10, height: 10, borderRadius: '2px',
+                    backgroundColor: chartColor, opacity: 0.8 }} />
                   <Typography sx={{ fontSize: 11, color: T.textMuted }}>Actual</Typography>
                 </Box>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                  <Box sx={{ width: 8, height: 2, borderRadius: 1, backgroundColor: chartColor, border: '1px dashed' }} />
+                  <Box sx={{ width: 18, height: 2, borderRadius: 1,
+                    backgroundColor: chartColor,
+                    backgroundImage: `repeating-linear-gradient(90deg, ${chartColor} 0, ${chartColor} 5px, transparent 5px, transparent 8px)` }} />
                   <Typography sx={{ fontSize: 11, color: T.textMuted }}>Predicted</Typography>
                 </Box>
               </Box>
