@@ -1381,7 +1381,7 @@ const Dashboard = ({ onNavigate, onLogout }) => {
                           '& .MuiSelect-select': { py: '4px', px: '10px' } }}>
                         {availableForecastYears.map(yr => (
                           <MenuItemComponent key={yr} value={yr} sx={{ fontSize: 12 }}>
-                            {yr}{yr === forecastYear ? ' ()' : ' ()'}
+                            {yr}{yr === forecastYear ? ' ' : ' '}
                           </MenuItemComponent>
                         ))}
                       </Select>
