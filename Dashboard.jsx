@@ -1371,7 +1371,7 @@ const Dashboard = ({ onNavigate, onLogout }) => {
                   {/* ── Year Selector — always visible when there are multiple years ── */}
                   {availableForecastYears.length > 1 && (
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
-                      <HistoryIcon sx={{ fontSize: 14, color: T.textMuted }} />
+                     
                       <Typography sx={{ fontSize: 11.5, color: T.textMuted, fontWeight: 500 }}>Year:</Typography>
                       <Select
                         value={selectedForecastYear || ''}
@@ -1381,7 +1381,7 @@ const Dashboard = ({ onNavigate, onLogout }) => {
                           '& .MuiSelect-select': { py: '4px', px: '10px' } }}>
                         {availableForecastYears.map(yr => (
                           <MenuItemComponent key={yr} value={yr} sx={{ fontSize: 12 }}>
-                            {yr}{yr === forecastYear ? ' (latest)' : ' (past)'}
+                            {yr}{yr === forecastYear ? ' ()' : ' ()'}
                           </MenuItemComponent>
                         ))}
                       </Select>
