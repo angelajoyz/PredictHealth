@@ -106,7 +106,6 @@ const ProfileDialog = ({ open, onClose }) => {
   const username = localStorage.getItem('username') || '';
   const email    = localStorage.getItem('email') || '';
 
-  // Derive initials for avatar
   const initials = fullName
     ? fullName.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
     : username.slice(0, 2).toUpperCase();
@@ -125,62 +124,22 @@ const ProfileDialog = ({ open, onClose }) => {
         },
       }}
     >
-      {/* Header */}
       <DialogTitle
         sx={{
-          pb: 0,
-          pt: 2.5,
-          px: 3,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
+          pb: 0, pt: 2.5, px: 3,
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         }}
       >
-        <Typography sx={{ fontSize: 14, fontWeight: 700, color: T.textHead }}>
-          My Profile
-        </Typography>
-        <Box
-          onClick={onClose}
-          sx={{
-            cursor: 'pointer',
-            color: T.textMuted,
-            display: 'flex',
-            alignItems: 'center',
-            borderRadius: '6px',
-            p: 0.25,
-            '&:hover': { color: T.danger, backgroundColor: T.dangerBg },
-          }}
-        >
+        <Typography sx={{ fontSize: 14, fontWeight: 700, color: T.textHead }}>My Profile</Typography>
+        <Box onClick={onClose} sx={{ cursor: 'pointer', color: T.textMuted, display: 'flex', alignItems: 'center', borderRadius: '6px', p: 0.25, '&:hover': { color: T.danger, backgroundColor: T.dangerBg } }}>
           <CloseIcon sx={{ fontSize: 17 }} />
         </Box>
       </DialogTitle>
 
       <DialogContent sx={{ px: 3, pt: 2.5, pb: 3 }}>
-        {/* Avatar + name block */}
-        <Box
-          sx={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            mb: 3,
-          }}
-        >
-          <Box
-            sx={{
-              width: 64,
-              height: 64,
-              borderRadius: '50%',
-              backgroundColor: T.blueDim,
-              border: `2px solid ${T.blue}`,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              mb: 1.25,
-            }}
-          >
-            <Typography sx={{ fontSize: 22, fontWeight: 700, color: T.blue }}>
-              {initials || '👤'}
-            </Typography>
+        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', mb: 3 }}>
+          <Box sx={{ width: 64, height: 64, borderRadius: '50%', backgroundColor: T.blueDim, border: `2px solid ${T.blue}`, display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1.25 }}>
+            <Typography sx={{ fontSize: 22, fontWeight: 700, color: T.blue }}>{initials || '👤'}</Typography>
           </Box>
           <Typography sx={{ fontSize: 15, fontWeight: 700, color: T.textHead, lineHeight: 1.3 }}>
             {fullName || username || 'User'}
@@ -189,85 +148,22 @@ const ProfileDialog = ({ open, onClose }) => {
 
         <Divider sx={{ mb: 2.5, borderColor: T.borderSoft }} />
 
-        {/* Info rows */}
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.75 }}>
-          {/* Full Name */}
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-            <Box
-              sx={{
-                width: 34,
-                height: 34,
-                borderRadius: '8px',
-                backgroundColor: T.blueDim,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                flexShrink: 0,
-              }}
-            >
-              <BadgeIcon sx={{ fontSize: 16, color: T.blue }} />
+          {[
+            { icon: <BadgeIcon sx={{ fontSize: 16, color: T.blue }} />, label: 'Full Name', value: fullName || '—' },
+            { icon: <PersonIcon sx={{ fontSize: 16, color: T.blue }} />, label: 'Username', value: `@${username || '—'}` },
+            { icon: <EmailIcon sx={{ fontSize: 16, color: T.blue }} />, label: 'Email', value: email || '—' },
+          ].map(({ icon, label, value }) => (
+            <Box key={label} sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+              <Box sx={{ width: 34, height: 34, borderRadius: '8px', backgroundColor: T.blueDim, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                {icon}
+              </Box>
+              <Box sx={{ minWidth: 0 }}>
+                <Typography sx={{ fontSize: 10.5, color: T.textMuted, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.4px' }}>{label}</Typography>
+                <Typography sx={{ fontSize: 13, color: T.textBody, fontWeight: 500, mt: 0.1 }}>{value}</Typography>
+              </Box>
             </Box>
-            <Box sx={{ minWidth: 0 }}>
-              <Typography sx={{ fontSize: 10.5, color: T.textMuted, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.4px' }}>
-                Full Name
-              </Typography>
-              <Typography sx={{ fontSize: 13, color: T.textBody, fontWeight: 500, mt: 0.1 }}>
-                {fullName || '—'}
-              </Typography>
-            </Box>
-          </Box>
-
-          {/* Username */}
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-            <Box
-              sx={{
-                width: 34,
-                height: 34,
-                borderRadius: '8px',
-                backgroundColor: T.blueDim,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                flexShrink: 0,
-              }}
-            >
-              <PersonIcon sx={{ fontSize: 16, color: T.blue }} />
-            </Box>
-            <Box sx={{ minWidth: 0 }}>
-              <Typography sx={{ fontSize: 10.5, color: T.textMuted, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.4px' }}>
-                Username
-              </Typography>
-              <Typography sx={{ fontSize: 13, color: T.textBody, fontWeight: 500, mt: 0.1 }}>
-                @{username || '—'}
-              </Typography>
-            </Box>
-          </Box>
-
-          {/* Email */}
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-            <Box
-              sx={{
-                width: 34,
-                height: 34,
-                borderRadius: '8px',
-                backgroundColor: T.blueDim,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                flexShrink: 0,
-              }}
-            >
-              <EmailIcon sx={{ fontSize: 16, color: T.blue }} />
-            </Box>
-            <Box sx={{ minWidth: 0 }}>
-              <Typography sx={{ fontSize: 10.5, color: T.textMuted, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.4px' }}>
-                Email
-              </Typography>
-              <Typography sx={{ fontSize: 13, color: T.textBody, fontWeight: 500, mt: 0.1 }}>
-                {email || '—'}
-              </Typography>
-            </Box>
-          </Box>
+          ))}
         </Box>
       </DialogContent>
     </Dialog>
@@ -275,7 +171,7 @@ const ProfileDialog = ({ open, onClose }) => {
 };
 
 // ── Sidebar ───────────────────────────────────────────────────────────────────
-const Sidebar = ({ currentPage, onNavigate, onLogout }) => {
+const Sidebar = ({ currentPage, onNavigate, onLogout, isPublic = false }) => {
   const [collapsed, setCollapsed] = useState(() => {
     const saved = localStorage.getItem('sidebarCollapsed');
     return saved === null ? true : saved === 'true';
@@ -291,12 +187,10 @@ const Sidebar = ({ currentPage, onNavigate, onLogout }) => {
   const [profileOpen, setProfileOpen] = useState(false);
   const footerRef = useRef(null);
 
-  // Read user info from localStorage
   const fullName = localStorage.getItem('fullName') || '';
   const username = localStorage.getItem('username') || 'User';
   const email    = localStorage.getItem('email') || '';
 
-  // Derive initials for avatar
   const initials = fullName
     ? fullName.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
     : username.slice(0, 2).toUpperCase();
@@ -335,8 +229,7 @@ const Sidebar = ({ currentPage, onNavigate, onLogout }) => {
                 display: 'flex', alignItems: 'center',
                 gap: 1.25, px: collapsed ? 0 : 2,
                 justifyContent: collapsed ? 'center' : 'flex-start',
-                minHeight: 64,
-                cursor: 'pointer',
+                minHeight: 64, cursor: 'pointer',
                 transition: 'background 0.13s',
                 '&:hover': { backgroundColor: T.sidebarHover },
               }}
@@ -380,7 +273,10 @@ const Sidebar = ({ currentPage, onNavigate, onLogout }) => {
             </Box>
           )}
 
-          {NAV_SECTIONS.map((section, sectionIdx) => (
+          {/* Filter out DATA section for public users */}
+          {NAV_SECTIONS
+            .filter(section => isPublic ? section.label === 'MAIN' : true)
+            .map((section, sectionIdx) => (
             <Box key={section.label} sx={{ mb: 2 }}>
               {!collapsed ? (
                 <Box sx={{ display: 'flex', alignItems: 'center', px: 0.5, mb: 0.5 }}>
@@ -461,110 +357,134 @@ const Sidebar = ({ currentPage, onNavigate, onLogout }) => {
         {/* ── Footer / User ── */}
         <Box ref={footerRef} sx={{ borderTop: `1px solid ${T.sidebarDivider}`, position: 'relative' }}>
 
-          {/* Pop-up menu */}
-          {menuOpen && (
-            <Box sx={{
-              position: 'absolute', bottom: '100%', left: 8, right: 8, mb: 0.5,
-              backgroundColor: '#FFFFFF', border: `1px solid ${T.sidebarDivider}`,
-              borderRadius: '10px', overflow: 'hidden',
-              boxShadow: '0 -4px 16px rgba(0,0,0,0.08)',
-            }}>
-              {/* Profile option */}
+          {isPublic ? (
+            // ── Public: Sign In button ──
+            <Tooltip title={collapsed ? 'Sign In' : ''} placement="right">
               <Box
-                onClick={() => { setMenuOpen(false); setProfileOpen(true); }}
+                onClick={() => onLogout?.()}
                 sx={{
+                  px: collapsed ? 0 : 1.5, py: 1.25,
                   display: 'flex', alignItems: 'center',
                   justifyContent: collapsed ? 'center' : 'flex-start',
-                  gap: collapsed ? 0 : 1,
-                  px: collapsed ? 0 : 1.5, py: 1.1, cursor: 'pointer',
-                  transition: 'background 0.13s',
+                  gap: collapsed ? 0 : 1.125,
+                  cursor: 'pointer', transition: 'background 0.13s',
                   '&:hover': { backgroundColor: T.sidebarHover },
                 }}
               >
-                <PersonIcon sx={{ fontSize: 15, color: T.sidebarAccent }} />
+                <Box sx={{
+                  width: 30, height: 30, borderRadius: '50%', flexShrink: 0,
+                  backgroundColor: T.blueDim,
+                  border: `1.5px solid #BFDBFE`,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}>
+                  <PersonIcon sx={{ fontSize: 15, color: T.blue }} />
+                </Box>
                 {!collapsed && (
-                  <Typography sx={{ fontSize: 12.5, fontWeight: 500, color: T.sidebarText }}>
-                    Profile
+                  <Typography sx={{ fontSize: 13, fontWeight: 600, color: T.blue }}>
+                    Sign In
                   </Typography>
                 )}
               </Box>
+            </Tooltip>
+          ) : (
+            // ── Authenticated: Profile + Sign Out ──
+            <>
+              {menuOpen && (
+                <Box sx={{
+                  position: 'absolute', bottom: '100%', left: 8, right: 8, mb: 0.5,
+                  backgroundColor: '#FFFFFF', border: `1px solid ${T.sidebarDivider}`,
+                  borderRadius: '10px', overflow: 'hidden',
+                  boxShadow: '0 -4px 16px rgba(0,0,0,0.08)',
+                }}>
+                  <Box
+                    onClick={() => { setMenuOpen(false); setProfileOpen(true); }}
+                    sx={{
+                      display: 'flex', alignItems: 'center',
+                      justifyContent: collapsed ? 'center' : 'flex-start',
+                      gap: collapsed ? 0 : 1,
+                      px: collapsed ? 0 : 1.5, py: 1.1, cursor: 'pointer',
+                      transition: 'background 0.13s',
+                      '&:hover': { backgroundColor: T.sidebarHover },
+                    }}
+                  >
+                    <PersonIcon sx={{ fontSize: 15, color: T.sidebarAccent }} />
+                    {!collapsed && (
+                      <Typography sx={{ fontSize: 12.5, fontWeight: 500, color: T.sidebarText }}>Profile</Typography>
+                    )}
+                  </Box>
 
-              {/* Divider */}
-              <Box sx={{ height: '1px', backgroundColor: T.sidebarDivider, mx: 1 }} />
+                  <Box sx={{ height: '1px', backgroundColor: T.sidebarDivider, mx: 1 }} />
 
-              {/* Sign out option */}
-              <Box
-                onClick={() => { setMenuOpen(false); onLogout?.(); }}
-                sx={{
-                  display: 'flex', alignItems: 'center',
-                  justifyContent: collapsed ? 'center' : 'flex-start',
-                  gap: collapsed ? 0 : 1,
-                  px: collapsed ? 0 : 1.5, py: 1.1, cursor: 'pointer',
-                  transition: 'background 0.13s',
-                  '&:hover': { backgroundColor: '#FEF2F2' },
-                }}
-              >
-                <LogoutIcon sx={{ fontSize: 15, color: '#EF4444' }} />
-                {!collapsed && (
-                  <Typography sx={{ fontSize: 12.5, fontWeight: 500, color: '#EF4444' }}>
-                    Sign out
-                  </Typography>
-                )}
-              </Box>
-            </Box>
-          )}
+                  <Box
+                    onClick={() => { setMenuOpen(false); onLogout?.(); }}
+                    sx={{
+                      display: 'flex', alignItems: 'center',
+                      justifyContent: collapsed ? 'center' : 'flex-start',
+                      gap: collapsed ? 0 : 1,
+                      px: collapsed ? 0 : 1.5, py: 1.1, cursor: 'pointer',
+                      transition: 'background 0.13s',
+                      '&:hover': { backgroundColor: '#FEF2F2' },
+                    }}
+                  >
+                    <LogoutIcon sx={{ fontSize: 15, color: '#EF4444' }} />
+                    {!collapsed && (
+                      <Typography sx={{ fontSize: 12.5, fontWeight: 500, color: '#EF4444' }}>Sign out</Typography>
+                    )}
+                  </Box>
+                </Box>
+              )}
 
-          {/* User row */}
-          <Tooltip title={collapsed ? (fullName || email || username) : ''} placement="right">
-            <Box
-              onClick={() => setMenuOpen(o => !o)}
-              sx={{
-                px: collapsed ? 0 : 1.5, py: 1.25,
-                display: 'flex', alignItems: 'center',
-                justifyContent: collapsed ? 'center' : 'flex-start',
-                gap: collapsed ? 0 : 1.125,
-                cursor: 'pointer', transition: 'background 0.13s',
-                '&:hover': { backgroundColor: T.sidebarHover },
-              }}
-            >
-              {/* Avatar with initials */}
-              <Box sx={{
-                width: 30, height: 30, borderRadius: '50%', flexShrink: 0,
-                backgroundColor: T.blueDim,
-                border: `1.5px solid ${menuOpen ? T.primary : '#BFDBFE'}`,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                transition: 'border 0.13s',
-              }}>
-                <Typography sx={{ fontSize: 11, fontWeight: 700, color: T.blue, lineHeight: 1 }}>
-                  {initials || '👤'}
-                </Typography>
-              </Box>
-
-              {!collapsed && (
-                <>
-                  <Box sx={{ minWidth: 0, flex: 1 }}>
-                    <Typography sx={{
-                      fontSize: 12, fontWeight: 600, color: T.sidebarText,
-                      lineHeight: 1.3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                    }}>
-                      {fullName || username}
-                    </Typography>
-                    <Typography sx={{
-                      fontSize: 10, color: T.sidebarMute,
-                      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                    }}>
-                      {email || username}
+              <Tooltip title={collapsed ? (fullName || email || username) : ''} placement="right">
+                <Box
+                  onClick={() => setMenuOpen(o => !o)}
+                  sx={{
+                    px: collapsed ? 0 : 1.5, py: 1.25,
+                    display: 'flex', alignItems: 'center',
+                    justifyContent: collapsed ? 'center' : 'flex-start',
+                    gap: collapsed ? 0 : 1.125,
+                    cursor: 'pointer', transition: 'background 0.13s',
+                    '&:hover': { backgroundColor: T.sidebarHover },
+                  }}
+                >
+                  <Box sx={{
+                    width: 30, height: 30, borderRadius: '50%', flexShrink: 0,
+                    backgroundColor: T.blueDim,
+                    border: `1.5px solid ${menuOpen ? T.primary : '#BFDBFE'}`,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    transition: 'border 0.13s',
+                  }}>
+                    <Typography sx={{ fontSize: 11, fontWeight: 700, color: T.blue, lineHeight: 1 }}>
+                      {initials || '👤'}
                     </Typography>
                   </Box>
-                  <ArrowUpIcon sx={{
-                    fontSize: 14, color: T.sidebarMute, flexShrink: 0,
-                    transition: 'transform 0.2s',
-                    transform: menuOpen ? 'rotate(0deg)' : 'rotate(180deg)',
-                  }} />
-                </>
-              )}
-            </Box>
-          </Tooltip>
+
+                  {!collapsed && (
+                    <>
+                      <Box sx={{ minWidth: 0, flex: 1 }}>
+                        <Typography sx={{
+                          fontSize: 12, fontWeight: 600, color: T.sidebarText,
+                          lineHeight: 1.3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                        }}>
+                          {fullName || username}
+                        </Typography>
+                        <Typography sx={{
+                          fontSize: 10, color: T.sidebarMute,
+                          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                        }}>
+                          {email || username}
+                        </Typography>
+                      </Box>
+                      <ArrowUpIcon sx={{
+                        fontSize: 14, color: T.sidebarMute, flexShrink: 0,
+                        transition: 'transform 0.2s',
+                        transform: menuOpen ? 'rotate(0deg)' : 'rotate(180deg)',
+                      }} />
+                    </>
+                  )}
+                </Box>
+              </Tooltip>
+            </>
+          )}
         </Box>
       </Box>
 
