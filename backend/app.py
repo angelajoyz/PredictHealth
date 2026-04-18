@@ -34,16 +34,24 @@ jwt = JWTManager(app)
 mail = Mail(app)
 
 
-CORS(app, resources={r"/api/*": {
-    "origins": [
-        "https://predict-health.vercel.app",
-        "http://localhost:5173",
-        "http://localhost:3000",
-    ],
-    "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    "allow_headers": ["Content-Type", "Authorization"],
-    "supports_credentials": True,
-}})
+CORS(app, resources={
+    r"/api/public/*": {
+        "origins": "*",
+        "methods": ["GET", "OPTIONS"],
+        "allow_headers": ["Content-Type"],
+        "supports_credentials": False,
+    },
+    r"/api/*": {
+        "origins": [
+            "https://predict-health.vercel.app",
+            "http://localhost:5173",
+            "http://localhost:3000",
+        ],
+        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization"],
+        "supports_credentials": True,
+    },
+})
 app.register_blueprint(auth_bp,  url_prefix='/api/auth')
 app.register_blueprint(admin_bp, url_prefix='/api/admin')
 
@@ -1241,6 +1249,161 @@ def delete_upload_history(upload_id):
 
     except Exception as e:
         db.session.rollback()
+        import traceback
+        print(traceback.format_exc())
+        return jsonify({'error': str(e)}), 500
+
+# ── PUBLIC ENDPOINTS (no auth required) ──────────────────────────────────────
+
+@app.route('/api/public/dataset-info', methods=['GET'])
+def public_dataset_info():
+    """Returns barangay list, disease columns, and city for public/landing page."""
+    try:
+        rows = db.session.query(
+            BarangayData.barangay,
+            BarangayData.city,
+            BarangayData.disease_category,
+        ).distinct().all()
+
+        if not rows:
+            return jsonify({
+                'barangays': [], 'disease_columns': [],
+                'city': '', 'has_saved_forecasts': False
+            }), 200
+
+        barangays        = sorted(set(r.barangay for r in rows if r.barangay))
+        disease_columns  = sorted(set(
+            f"{r.disease_category}_cases"
+            for r in rows if r.disease_category
+        ))
+        city_val         = rows[0].city or ''
+        has_saved        = Forecast.query.first() is not None
+
+        return jsonify({
+            'barangays':           barangays,
+            'disease_columns':     disease_columns,
+            'city':                city_val,
+            'has_saved_forecasts': has_saved,
+        }), 200
+
+    except Exception as e:
+        import traceback
+        print(traceback.format_exc())
+        return jsonify({
+            'barangays': [], 'disease_columns': [],
+            'city': '', 'has_saved_forecasts': False
+        }), 200
+
+
+@app.route('/api/public/forecast', methods=['GET'])
+def public_forecast():
+    """Returns saved forecast data for public view (read-only, no auth)."""
+    try:
+        barangay = request.args.get('barangay', '__ALL__').strip()
+
+        if barangay == '__ALL__':
+            result = get_all_saved_forecast_dict(city=None, forecast_year=None)
+        else:
+            result = get_saved_forecast_dict(
+                barangay=barangay, city=None, forecast_year=None
+            )
+
+        if not result:
+            return jsonify({'not_found': True}), 200
+
+        # Attach barangay list so frontend can populate the dropdown
+        barangay_rows = db.session.query(
+            BarangayData.barangay
+        ).distinct().order_by(BarangayData.barangay).all()
+        result['barangays'] = [r.barangay for r in barangay_rows if r.barangay]
+        result['not_found'] = False
+
+        return jsonify(result), 200
+
+    except Exception as e:
+        import traceback
+        print(traceback.format_exc())
+        return jsonify({'not_found': True, 'error': str(e)}), 200
+
+
+@app.route('/api/public/disease-breakdown', methods=['GET'])
+def public_disease_breakdown():
+    """Public version of disease breakdown (no auth required)."""
+    from sqlalchemy import func
+    category = request.args.get('category', '').strip()
+    barangay = request.args.get('barangay', '__ALL__').strip()
+    city     = request.args.get('city', '').strip()
+    top_n    = int(request.args.get('top_n', 5))
+
+    if not category:
+        return jsonify({'error': 'category is required'}), 400
+
+    try:
+        q = db.session.query(
+            BarangayData.disease_label,
+            BarangayData.disease_category,
+            func.sum(BarangayData.total_cases).label('total_cases'),
+            func.sum(BarangayData.total_male).label('total_male'),
+            func.sum(BarangayData.total_female).label('total_female'),
+        ).filter(BarangayData.disease_category == category)
+
+        if barangay and barangay != '__ALL__':
+            q = q.filter(BarangayData.barangay.ilike(barangay))
+        if city:
+            q = q.filter(BarangayData.city.ilike(f'%{city}%'))
+
+        q = q.group_by(
+            BarangayData.disease_label,
+            BarangayData.disease_category,
+        ).order_by(func.sum(BarangayData.total_cases).desc()).limit(top_n)
+
+        rows = q.all()
+
+        monthly_trend = []
+        if rows:
+            top_label = rows[0].disease_label
+            trend_q = db.session.query(
+                BarangayData.year,
+                BarangayData.month,
+                func.sum(BarangayData.total_cases).label('cases'),
+            ).filter(
+                BarangayData.disease_category == category,
+                BarangayData.disease_label    == top_label,
+            )
+            if barangay and barangay != '__ALL__':
+                trend_q = trend_q.filter(BarangayData.barangay.ilike(barangay))
+            if city:
+                trend_q = trend_q.filter(BarangayData.city.ilike(f'%{city}%'))
+
+            trend_q = trend_q.group_by(
+                BarangayData.year, BarangayData.month
+            ).order_by(BarangayData.year, BarangayData.month).limit(24)
+
+            monthly_trend = [
+                {
+                    'period': f"{r.year}-{str(r.month).zfill(2)}",
+                    'cases':  int(r.cases or 0)
+                }
+                for r in trend_q.all()
+            ]
+
+        return jsonify({
+            'category':      category,
+            'barangay':      barangay,
+            'breakdown': [
+                {
+                    'label':        r.disease_label or category.replace('_', ' ').title(),
+                    'category':     r.disease_category,
+                    'total_cases':  int(r.total_cases  or 0),
+                    'total_male':   int(r.total_male   or 0),
+                    'total_female': int(r.total_female or 0),
+                }
+                for r in rows
+            ],
+            'monthly_trend': monthly_trend,
+        }), 200
+
+    except Exception as e:
         import traceback
         print(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
