@@ -692,8 +692,10 @@ const Dashboard = ({ onNavigate, onLogout, isPublic = false }) => {
   useEffect(() => { localStorage.setItem('cachedForecastDisease', selectedDisease); }, [selectedDisease]);
 
   // ── Load forecast when barangay OR selected year changes ─────────────────────
-  useEffect(() => {
-    if (!hasDbData || selectedForecastYear === null) return;
+// BAGO:
+useEffect(() => {
+  if (selectedForecastYear === null) return;
+  if (!isPublic && !hasDbData) return;
     const city = localStorage.getItem('datasetCity') || '';
     setFetchingForecast(true);
     setForecastError('');

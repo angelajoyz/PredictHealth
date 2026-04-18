@@ -34,15 +34,12 @@ const theme = createTheme({
   },
 });
 
-// ── Read reset token from URL (?token=xxx) ────────────────────────────────────
-// If present the user arrived from a password-reset email link.
 const getResetTokenFromUrl = () => {
   const params = new URLSearchParams(window.location.search);
   return params.get("token") || null;
 };
 
 function App() {
-  // ── Detect special entry URLs ─────────────────────────────────────────────
   const resetToken = getResetTokenFromUrl();
 
   const [isAuthenticated, setIsAuthenticated] = useState(() => {
@@ -50,7 +47,7 @@ function App() {
     return !!token;
   });
 
-const [currentPage, setCurrentPage] = useState(() => {
+  const [currentPage, setCurrentPage] = useState(() => {
     if (window.location.pathname === "/reset-password" && resetToken) {
       return "forgot";
     }
@@ -64,32 +61,27 @@ const [currentPage, setCurrentPage] = useState(() => {
     return localStorage.getItem("currentPage") || "dashboard";
   });
 
-  // Validate token on app load
-// Palitan ang useEffect sa App.jsx:
-useEffect(() => {
-  if (isAuthenticated) {
-    getCurrentUser()
-      .then(() => {})
-      .catch((err) => {
-        // Logout ONLY sa actual auth errors, hindi sa network/CORS errors
-        const isAuthError =
-          err.message?.includes("Session expired") ||
-          err.message?.includes("Not logged in");
-        
-        if (isAuthError) {
-          setIsAuthenticated(false);
-          setCurrentPage("login");
-          localStorage.removeItem("currentPage");
-          localStorage.removeItem("token");
-          localStorage.removeItem("username");
-          localStorage.removeItem("role");
-          localStorage.removeItem("fullName");
-          localStorage.removeItem("email");
-        }
-        // Network/CORS errors → stay logged in
-      });
-  }
-}, [isAuthenticated]);
+  useEffect(() => {
+    if (isAuthenticated) {
+      getCurrentUser()
+        .then(() => {})
+        .catch((err) => {
+          const isAuthError =
+            err.message?.includes("Session expired") ||
+            err.message?.includes("Not logged in");
+          if (isAuthError) {
+            setIsAuthenticated(false);
+            setCurrentPage("login");
+            localStorage.removeItem("currentPage");
+            localStorage.removeItem("token");
+            localStorage.removeItem("username");
+            localStorage.removeItem("role");
+            localStorage.removeItem("fullName");
+            localStorage.removeItem("email");
+          }
+        });
+    }
+  }, [isAuthenticated]);
 
   const [uploadedFile, setUploadedFile] = useState(null);
   const [uploadedData, setUploadedData] = useState(() => {
@@ -142,20 +134,45 @@ useEffect(() => {
     uploadedData: uploadedData,
   };
 
+  // ── Public navigation handler ─────────────────────────────────────────────
+  const handlePublicNavigate = (page) => {
+    if (page === "login") {
+      setCurrentPage("login");
+    } else if (page === "dashboard") {
+      setCurrentPage("browse");
+    } else if (page === "prediction") {
+      setCurrentPage("browse-prediction");
+    }
+    // history, dataimport, etc. → redirect to login for public users
+    else {
+      setCurrentPage("login");
+    }
+  };
+
+  const isPublicPage = currentPage === "browse" || currentPage === "browse-prediction";
+
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <div>
+        {/* ── PUBLIC PAGES (no login required) ── */}
         {currentPage === "browse" && (
-  <Dashboard
-    onNavigate={(page) => {
-      if (page === "login") setCurrentPage("login");
-    }}
-    onLogout={() => setCurrentPage("login")}
-    isPublic={true}
-  />
-)}
+          <Dashboard
+            onNavigate={handlePublicNavigate}
+            onLogout={() => setCurrentPage("login")}
+            isPublic={true}
+          />
+        )}
 
+        {currentPage === "browse-prediction" && (
+          <Prediction
+            onNavigate={handlePublicNavigate}
+            onLogout={() => setCurrentPage("login")}
+            isPublic={true}
+          />
+        )}
+
+        {/* ── AUTH PAGES ── */}
         {currentPage === "login" && (
           <Login
             onLogin={() => {
@@ -166,8 +183,6 @@ useEffect(() => {
             onForgotPassword={() => setCurrentPage("forgot")}
           />
         )}
-
-    
 
         {currentPage === "verify-email" && (
           <VerifyEmail
@@ -180,11 +195,8 @@ useEffect(() => {
 
         {currentPage === "forgot" && (
           <ForgotPassword
-            // If user arrived via reset-password link, pass the token so
-            // ForgotPassword skips straight to the "Set New Password" step.
             token={resetToken}
             onBack={() => {
-              // Clean up the URL if we came from a reset link
               if (resetToken) {
                 window.history.replaceState({}, "", "/");
               }
@@ -193,14 +205,12 @@ useEffect(() => {
           />
         )}
 
+        {/* ── AUTHENTICATED PAGES ── */}
         {currentPage === "dashboard" && <Dashboard {...sharedProps} />}
-
-        {currentPage === "history" && <History {...sharedProps} />}
-
+        {currentPage === "history"   && <History   {...sharedProps} />}
         {currentPage === "dataimport" && (
           <DataImport {...sharedProps} onDataUploaded={handleDataUploaded} />
         )}
-
         {currentPage === "prediction" && <Prediction {...sharedProps} />}
       </div>
     </ThemeProvider>

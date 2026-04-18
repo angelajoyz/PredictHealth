@@ -2066,7 +2066,7 @@ const getCurrentMonth = () => String(new Date().getMonth() + 1).padStart(2, '0')
 
 
 // ── Main Prediction Page ──────────────────────────────────────────────────────
-const Prediction = ({ onNavigate, onLogout }) => {
+const Prediction = ({ onNavigate, onLogout, isPublic = false }) => {
   const [forecastData,       setForecastData]       = useState(() => {
     try { const s = localStorage.getItem('cachedForecastData'); return s ? JSON.parse(s) : null; } catch { return null; }
   });
@@ -2195,7 +2195,7 @@ const Prediction = ({ onNavigate, onLogout }) => {
   return (
     <>
     <Box sx={{ display: 'flex', minHeight: '100vh', backgroundColor: T.pageBg }}>
-      <Sidebar currentPage="prediction" onNavigate={onNavigate} onLogout={onLogout} />
+<Sidebar currentPage="prediction" onNavigate={onNavigate} onLogout={onLogout} isPublic={isPublic} />
       <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
 
         <Box sx={{ px: '24px', minHeight: 64, display: 'flex', alignItems: 'center',
@@ -2255,14 +2255,17 @@ const Prediction = ({ onNavigate, onLogout }) => {
                     </Box>
                   )}
                 </Box>
-                <ExportMenu
-                  forecastHistory={forecastHistory}
-                  confirmedBarangays={confirmedBarangays}
-                  availableDiseases={availableDiseases}
-                  cityLabel={cityLabel}
-                  selectedYear={selectedYear} 
-                  selectedMonth={selectedMonth}
-                />
+                
+                {!isPublic && (
+                  <ExportMenu
+                    forecastHistory={forecastHistory}
+                    confirmedBarangays={confirmedBarangays}
+                    availableDiseases={availableDiseases}
+                    cityLabel={cityLabel}
+                    selectedYear={selectedYear}
+                    selectedMonth={selectedMonth}
+                  />
+                )}
               </Box>
             </CardContent>
           </SCard>
