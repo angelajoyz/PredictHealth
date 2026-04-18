@@ -7,7 +7,6 @@ import History from "./History";
 import Prediction from "./Prediction";
 import DataImport from "./DataImport";
 import VerifyEmail from "./VerifyEmail";
-import Register from "./Register";
 import ForgotPassword from "./ForgotPassword";
 import { getCurrentUser } from "./services/api";
 
@@ -158,14 +157,12 @@ useEffect(() => {
               setIsAuthenticated(true);
               handleNavigate("dashboard");
             }}
-            onGoToRegister={() => setCurrentPage("register")}
+            onGoToRegister={null}
             onForgotPassword={() => setCurrentPage("forgot")}
           />
         )}
 
-        {currentPage === "register" && (
-          <Register onGoToLogin={() => setCurrentPage("login")} />
-        )}
+    
 
         {currentPage === "verify-email" && (
           <VerifyEmail

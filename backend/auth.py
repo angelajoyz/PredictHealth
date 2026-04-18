@@ -113,50 +113,8 @@ def _send_reset_email(user):
 
 @auth_bp.route('/register', methods=['POST'])
 def register():
-    data = request.get_json() or {}
+    return jsonify({'error': 'Public registration is disabled. Contact your administrator.'}), 403
 
-    username  = data.get('username', '').strip()
-    email     = data.get('email', '').strip()
-    password  = data.get('password', '')
-    full_name = data.get('full_name', '').strip()
-
-    if not username or not email or not password:
-        return jsonify({'error': 'username, email, and password are required'}), 400
-
-    if len(password) < 8:
-        return jsonify({'error': 'Password must be at least 8 characters'}), 400
-
-    if User.query.filter_by(username=username).first():
-        return jsonify({'error': f"Username '{username}' is already taken"}), 409
-
-    if User.query.filter_by(email=email).first():
-        return jsonify({'error': f"Email '{email}' is already registered"}), 409
-
-    user = User(
-        username       = username,
-        email          = email,
-        full_name      = full_name,
-        role           = 'staff',
-        is_active      = True,
-        email_verified = False,
-    )
-    user.set_password(password)
-    db.session.add(user)
-    db.session.commit()
-
-    try:
-        _send_verification_email(user)
-    except Exception as e:
-        current_app.logger.error(f"Failed to send verification email: {e}")
-        return jsonify({
-            'message': 'Account created but verification email failed to send. Contact admin.',
-            'user': user.to_dict(),
-        }), 201
-
-    return jsonify({
-        'message': 'Account created! Check your email to verify your account.',
-        'user': user.to_dict(),
-    }), 201
 
 
 @auth_bp.route('/verify-email', methods=['POST'])
