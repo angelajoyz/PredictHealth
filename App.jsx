@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { ThemeProvider, createTheme } from "@mui/material/styles";
 import CssBaseline from "@mui/material/CssBaseline";
 import Login from "./Login";
+import Landing from "./Landing";
 import Dashboard from "./Dashboard";
 import History from "./History";
 import Prediction from "./Prediction";
@@ -50,21 +51,16 @@ function App() {
     return !!token;
   });
 
-  const [currentPage, setCurrentPage] = useState(() => {
-    // Password-reset link: /reset-password?token=xxx
-    if (
-      window.location.pathname === "/reset-password" &&
-      resetToken
-    ) {
+const [currentPage, setCurrentPage] = useState(() => {
+    if (window.location.pathname === "/reset-password" && resetToken) {
       return "forgot";
     }
-    // Email verification link
     if (window.location.pathname === "/verify-email") {
       return "verify-email";
     }
     if (!isAuthenticated) {
       localStorage.removeItem("currentPage");
-      return "login";
+      return "landing"; // ← LANDING na ang default, hindi login
     }
     return localStorage.getItem("currentPage") || "dashboard";
   });
@@ -151,6 +147,14 @@ useEffect(() => {
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <div>
+    {currentPage === "landing" && (
+  <Landing
+    onGoToLogin={() => setCurrentPage("login")}
+    onBrowse={() => setCurrentPage("browse")}
+  />
+)}
+
+
         {currentPage === "login" && (
           <Login
             onLogin={() => {
