@@ -507,23 +507,6 @@ const Login = ({ onLogin, onGoToRegister, onForgotPassword }) => {
             {loading ? "Signing in…" : "Sign In"}
           </Button>
 
-          <Typography
-            sx={{ fontSize: 12, color: T.t3, textAlign: "center", mt: 2.5 }}
-          >
-            Don't have an account?{" "}
-            <Box
-              component="span"
-              onClick={onGoToRegister}
-              sx={{
-                color: T.blue,
-                fontWeight: 600,
-                cursor: "pointer",
-                "&:hover": { textDecoration: "underline" },
-              }}
-            >
-              Register
-            </Box>
-          </Typography>
 
           <Typography
             sx={{
