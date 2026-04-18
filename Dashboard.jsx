@@ -637,7 +637,7 @@ const ResultRow = ({ item, forecastData, selectedBarangay }) => {
 };
 
 // ── Main Dashboard ─────────────────────────────────────────────────────────────
-const Dashboard = ({ onNavigate, onLogout }) => {
+const Dashboard = ({ onNavigate, onLogout, isPublic = false }) => {
   const [selectedBarangay,    setSelectedBarangay]   = useState(() => localStorage.getItem('cachedForecastBarangay') || ALL_BARANGAYS);
   const [selectedDisease,     setSelectedDisease]    = useState(() => localStorage.getItem('cachedForecastDisease')  || 'all');
   const [availableBarangays,  setAvailableBarangays] = useState([]);
@@ -1230,22 +1230,24 @@ const Dashboard = ({ onNavigate, onLogout }) => {
                     ))}
                   </Select>
                 </Box>
-                <Tooltip title={datasetNotReady ? `Dataset must end in December ${datasetReadiness?.endYear} before forecasting` : ''} arrow>
-                  <span style={{ marginLeft: 'auto' }}>
-                    <Button variant="contained" onClick={handleGenerateClick}
-                      disabled={buttonDisabled}
-                      startIcon={forecastLoading
-                        ? <CircularProgress size={13} color="inherit" />
-                        : datasetNotReady ? <LockIcon sx={{ fontSize: 15 }} />
-                        : <PsychologyIcon sx={{ fontSize: 15 }} />}
-                      sx={{ textTransform: 'none', fontWeight: 600, fontSize: 13, borderRadius: '8px',
-                        px: 2.5, py: '7px', backgroundColor: T.blue, color: '#fff',
-                        boxShadow: '0 2px 8px rgba(37,99,235,0.2)',
-                        '&:hover': { backgroundColor: T.blueMid }, '&:disabled': { opacity: 0.5 } }}>
-                      {buttonLabel}
-                    </Button>
-                  </span>
-                </Tooltip>
+               {!isPublic && (
+  <Tooltip title={datasetNotReady ? `Dataset must end in December ${datasetReadiness?.endYear} before forecasting` : ''} arrow>
+    <span style={{ marginLeft: 'auto' }}>
+      <Button variant="contained" onClick={handleGenerateClick}
+        disabled={buttonDisabled}
+        startIcon={forecastLoading
+          ? <CircularProgress size={13} color="inherit" />
+          : datasetNotReady ? <LockIcon sx={{ fontSize: 15 }} />
+          : <PsychologyIcon sx={{ fontSize: 15 }} />}
+        sx={{ textTransform: 'none', fontWeight: 600, fontSize: 13, borderRadius: '8px',
+          px: 2.5, py: '7px', backgroundColor: T.blue, color: '#fff',
+          boxShadow: '0 2px 8px rgba(37,99,235,0.2)',
+          '&:hover': { backgroundColor: T.blueMid }, '&:disabled': { opacity: 0.5 } }}>
+        {buttonLabel}
+      </Button>
+    </span>
+  </Tooltip>
+)}
               </Box>
               <Box sx={{ mt: 1.5, px: '2px' }}>
                 {!hasNewUpload && !hasSavedForecasts && hasDbData && !datasetNotReady && (

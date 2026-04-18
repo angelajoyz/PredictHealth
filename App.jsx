@@ -9,7 +9,6 @@ import DataImport from "./DataImport";
 import VerifyEmail from "./VerifyEmail";
 import ForgotPassword from "./ForgotPassword";
 import { getCurrentUser } from "./services/api";
-import PublicBrowse from "./PublicBrowse";
 
 const theme = createTheme({
   palette: {
@@ -148,7 +147,13 @@ useEffect(() => {
       <CssBaseline />
       <div>
         {currentPage === "browse" && (
-  <PublicBrowse onGoToLogin={() => setCurrentPage("login")} />
+  <Dashboard
+    onNavigate={(page) => {
+      if (page === "login") setCurrentPage("login");
+    }}
+    onLogout={() => setCurrentPage("login")}
+    isPublic={true}
+  />
 )}
 
         {currentPage === "login" && (
