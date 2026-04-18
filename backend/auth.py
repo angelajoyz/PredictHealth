@@ -247,6 +247,49 @@ def reset_password():
     return jsonify({'message': 'Password reset successfully. You can now log in.'}), 200
 
 
+# ── Public routes (no auth required) ─────────────────────────────────────────
+
+@auth_bp.route('/public/dataset-info', methods=['GET'])
+def public_dataset_info():
+    """Public endpoint — returns barangay list and disease columns without auth."""
+    try:
+        from database import UploadHistory
+        latest = UploadHistory.query.filter_by(status='success').order_by(
+            UploadHistory.uploaded_at.desc()
+        ).first()
+
+        if not latest:
+            return jsonify({'barangays': [], 'disease_columns': [], 'city': ''}), 200
+
+        return jsonify({
+            'barangays':       latest.barangays or [],
+            'disease_columns': latest.disease_columns or [],
+            'city':            latest.city or '',
+        }), 200
+    except Exception as e:
+        current_app.logger.error(f"Public dataset-info error: {e}")
+        return jsonify({'barangays': [], 'disease_columns': [], 'city': ''}), 200
+
+
+@auth_bp.route('/public/forecast', methods=['GET'])
+def public_forecast():
+    """Public endpoint — returns saved forecast without auth."""
+    try:
+        from database import Forecast
+        barangay = request.args.get('barangay', '__ALL__')
+
+        forecast = Forecast.query.filter_by(barangay=barangay).order_by(
+            Forecast.created_at.desc()
+        ).first()
+
+        if not forecast:
+            return jsonify({'not_found': True}), 200
+
+        return jsonify(forecast.to_dict()), 200
+    except Exception as e:
+        current_app.logger.error(f"Public forecast error: {e}")
+        return jsonify({'not_found': True}), 200
+
 # ── Auth routes ──────────────────────────────────────────
 
 @auth_bp.route('/login', methods=['POST'])

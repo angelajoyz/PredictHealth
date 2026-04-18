@@ -2,7 +2,6 @@ import React, { useState, useEffect } from "react";
 import { ThemeProvider, createTheme } from "@mui/material/styles";
 import CssBaseline from "@mui/material/CssBaseline";
 import Login from "./Login";
-import Landing from "./Landing";
 import Dashboard from "./Dashboard";
 import History from "./History";
 import Prediction from "./Prediction";
@@ -10,6 +9,7 @@ import DataImport from "./DataImport";
 import VerifyEmail from "./VerifyEmail";
 import ForgotPassword from "./ForgotPassword";
 import { getCurrentUser } from "./services/api";
+import PublicBrowse from "./PublicBrowse";
 
 const theme = createTheme({
   palette: {
@@ -60,7 +60,7 @@ const [currentPage, setCurrentPage] = useState(() => {
     }
     if (!isAuthenticated) {
       localStorage.removeItem("currentPage");
-      return "landing"; // ← LANDING na ang default, hindi login
+      return "browse";
     }
     return localStorage.getItem("currentPage") || "dashboard";
   });
@@ -147,13 +147,9 @@ useEffect(() => {
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <div>
-    {currentPage === "landing" && (
-  <Landing
-    onGoToLogin={() => setCurrentPage("login")}
-    onBrowse={() => setCurrentPage("browse")}
-  />
+        {currentPage === "browse" && (
+  <PublicBrowse onGoToLogin={() => setCurrentPage("login")} />
 )}
-
 
         {currentPage === "login" && (
           <Login
