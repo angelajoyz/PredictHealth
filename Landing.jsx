@@ -212,7 +212,7 @@ const DashboardPreview = () => {
       const loc   = selectedBrgy === "__ALL__" ? "all barangays" : selectedBrgy;
       if (trend === "increasing") {
         increasing.push(d);
-        items.push({ type: "increasing", text: `${label} cases are projected to increase${pct ? " by " + pct : ""} in ${loc} — increased monitoring recommended.` });
+        items.push({ type: "increasing", text: `${label} cases are projected to increase${pct ? " by " + pct : ""} in ${loc} — monitoring recommended.` });
       } else if (trend === "decreasing") {
         items.push({ type: "decreasing", text: `${label} cases are projected to decline${pct ? " by " + pct : ""} in ${loc} — positive outlook.` });
       } else {
@@ -220,7 +220,7 @@ const DashboardPreview = () => {
       }
     });
     if (selectedDisease === "__ALL__" && increasing.length >= 2) {
-      items.unshift({ type: "warning", text: `${increasing.length} disease categories are trending upward simultaneously — consider prioritizing resources.` });
+      items.unshift({ type: "warning", text: `${increasing.length} disease categories are trending upward simultaneously — health interventions may be needed.` });
     }
     return items;
   };
@@ -325,7 +325,7 @@ const DashboardPreview = () => {
         borderRadius: "8px", backgroundColor: T.okBg, border: `1px solid ${T.okBorder}` }}>
         <CheckCircleIcon sx={{ fontSize: 14, color: T.ok }} />
         <Typography sx={{ fontSize: 12.5, color: "#1E293B" }}>
-          Showing forecast for <strong>{brgyLabel}</strong>
+          Public preview showing forecast for <strong>{brgyLabel}</strong>
           {selectedDisease !== "__ALL__" && <> · <strong>{diseaseLabel}</strong></>}
         </Typography>
       </Box>
@@ -462,7 +462,7 @@ const Counter = ({ target, suffix = "", duration = 1800 }) => {
 };
 
 const stats = [
-  { value: 64,   suffix: "",  label: "Barangays Covered",  sub: "All barangays in General Trias" },
+  { value: 33,   suffix: "",  label: "Barangays Covered",  sub: "All barangays in General Trias" },
   { value: 20,   suffix: "+", label: "Disease Categories", sub: "From CHO morbidity data"        },
   { value: 12,   suffix: "",  label: "Months Forecasted",  sub: "Full-year disease outlook"       },
   { value: 2024, suffix: "",  label: "Latest Data Year",   sub: "CHO General Trias records"       },
@@ -470,11 +470,11 @@ const stats = [
 
 const features = [
   { icon: <PsychologyIcon sx={{ fontSize: 28, color: "#4A90D9" }} />, title: "LSTM-Based Disease Forecasting", desc: "Predicts disease case volumes up to 12 months ahead using time-series machine learning trained on General Trias health records." },
-  { icon: <LocationOnIcon sx={{ fontSize: 28, color: "#4A90D9" }} />, title: "Per-Barangay Analysis", desc: "Drill down to each barangay in General Trias — from Alingaro to Zulueta — for localized health planning and resource allocation." },
+  { icon: <LocationOnIcon sx={{ fontSize: 28, color: "#4A90D9" }} />, title: "Per-Barangay Analysis", desc: "Explore forecasts for each of the 33 barangays in General Trias for localized health insights." },
   { icon: <TrendingUpIcon sx={{ fontSize: 28, color: "#4A90D9" }} />, title: "Multi-Disease Monitoring", desc: "Track dengue, respiratory illness, tuberculosis, hypertension, diarrhea, and more — all sourced from CHO General Trias records." },
-  { icon: <GroupIcon sx={{ fontSize: 28, color: "#4A90D9" }} />, title: "Age & Sex Breakdown", desc: "Understand which age groups and sex are most at risk per disease category in each barangay health center catchment area." },
-  { icon: <BarChartIcon sx={{ fontSize: 28, color: "#4A90D9" }} />, title: "Actual vs. Predicted Charts", desc: "Compare CHO-reported actual case counts against LSTM predictions to assess forecast accuracy and seasonal patterns." },
-  { icon: <MedicalServicesIcon sx={{ fontSize: 28, color: "#4A90D9" }} />, title: "CHO-Integrated Data Pipeline", desc: "Data is sourced directly from the City Health Office of General Trias — ensuring forecasts reflect real local health conditions." },
+  { icon: <GroupIcon sx={{ fontSize: 28, color: "#4A90D9" }} />, title: "Select by Disease Category", desc: "Filter forecasts by specific disease types or view all categories together." },
+  { icon: <BarChartIcon sx={{ fontSize: 28, color: "#4A90D9" }} />, title: "Trend Analysis", desc: "View historical trends and forecasted patterns to understand disease progression and seasonal variations." },
+  { icon: <MedicalServicesIcon sx={{ fontSize: 28, color: "#4A90D9" }} />, title: "Data from CHO General Trias", desc: "All forecasts are based on official morbidity records from the City Health Office Pinagtipunan of General Trias." },
 ];
 
 const PredictHealthLogo = ({ size = 36 }) => (
@@ -504,7 +504,7 @@ const Landing = ({ onGoToLogin }) => {
           <PredictHealthLogo size={34} />
           <Box>
             <Typography sx={{ fontSize: 14.5, fontWeight: 800, color: "rgba(255,255,255,0.92)", lineHeight: 1.2 }}>PredictHealth</Typography>
-            <Typography sx={{ fontSize: 8.5, color: "rgba(255,255,255,0.3)", letterSpacing: "1.2px", textTransform: "uppercase" }}>General Trias · Barangay Health Forecasting</Typography>
+            <Typography sx={{ fontSize: 8.5, color: "rgba(255,255,255,0.3)", letterSpacing: "1.2px", textTransform: "uppercase" }}>General Trias · Disease Forecasting System</Typography>
           </Box>
         </Box>
         <Button onClick={onGoToLogin} variant="contained"
@@ -528,19 +528,16 @@ const Landing = ({ onGoToLogin }) => {
         </Box>
         <Typography sx={{ fontSize: { xs: 26, md: 44 }, fontWeight: 800,
           color: "rgba(255,255,255,0.93)", letterSpacing: "-1px", lineHeight: 1.18, mb: 2 }}>
-          Health Forecasting for<br />
-          <Box component="span" sx={{ color: "#5B9FD4" }}>Barangay Health Centers</Box>
+          Public Health Forecasting<br />
+          <Box component="span" sx={{ color: "#5B9FD4" }}>for General Trias City</Box>
         </Typography>
         <Typography sx={{ fontSize: { xs: 13, md: 15 }, color: "rgba(255,255,255,0.42)",
           maxWidth: 560, mx: "auto", mb: 1.5, lineHeight: 1.8 }}>
           Powered by machine learning and data from the{" "}
           <Box component="span" sx={{ color: "rgba(255,255,255,0.7)", fontWeight: 600 }}>City Health Office of General Trias</Box>
           {" "}— forecasting disease trends across all{" "}
-          <Box component="span" sx={{ color: "#5B9FD4", fontWeight: 600 }}>64 barangays</Box>
-          {" "}to support health planning and early intervention.
-        </Typography>
-        <Typography sx={{ fontSize: 12, color: "rgba(255,255,255,0.25)", fontStyle: "italic" }}>
-          Data pinagtipunan ng CHO General Trias para sa mas epektibong serbisyong pangkalusugan.
+          <Box component="span" sx={{ color: "#5B9FD4", fontWeight: 600 }}>33 barangays</Box>
+          {" "} to support community health awareness and public health planning.
         </Typography>
       </Box>
 
@@ -557,19 +554,19 @@ const Landing = ({ onGoToLogin }) => {
                 <Typography sx={{ fontSize: 11, fontWeight: 600, color: "#0E7C3A" }}>🏥 About This System</Typography>
               </Box>
               <Typography sx={{ fontSize: { xs: 20, md: 26 }, fontWeight: 800, color: "#0F172A", mb: 2, lineHeight: 1.3 }}>
-                Built for the BHCs of General Trias, Cavite
+                Community Health Forecasting for General Trias
               </Typography>
               <Typography sx={{ fontSize: 13.5, color: "#4B5563", lineHeight: 1.85, mb: 2 }}>
-                PredictHealth is an ML-based health forecasting system developed specifically for the{" "}
-                <strong>Barangay Health Centers (BHC)</strong> of General Trias City, Cavite.
+                PredictHealth is an ML-based health forecasting system developed for the{" "}
+                <strong>City of General Trias, Cavite</strong>.
                 It uses LSTM neural networks trained on historical morbidity data compiled by the{" "}
-                <strong>City Health Office (CHO)</strong>.
+                <strong>City Health Office (CHO) General Trias</strong>.
               </Typography>
               <Typography sx={{ fontSize: 13.5, color: "#4B5563", lineHeight: 1.85, mb: 3 }}>
-                The system helps health personnel, BHC midwives, and CHO staff anticipate disease surges and plan health interventions across all barangays.
+                The system helps the public understand disease trends and supports health personnel in planning community health interventions across all barangays.
               </Typography>
               <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
-                {["Data sourced exclusively from CHO General Trias morbidity records","Covers all 64 barangays under the City Health Office","Supports BHC-level health planning and budgeting","Accessible to authorized CHO and BHC health personnel"].map((item, i) => (
+                {["Data sourced from CHO General Trias morbidity records","Covers all 33 barangays of General Trias City","Supports community health awareness and planning"].map((item, i) => (
                   <Box key={i} sx={{ display: "flex", alignItems: "flex-start", gap: 1.25 }}>
                     <Box sx={{ width: 18, height: 18, borderRadius: "50%", flexShrink: 0, mt: "1px",
                       backgroundColor: "rgba(27,79,138,0.1)", display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -582,9 +579,9 @@ const Landing = ({ onGoToLogin }) => {
             </Box>
             <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
               {[
-                { icon: "🏛️", title: "City Health Office (CHO)", desc: "General Trias City, Cavite — primary data source for all morbidity records and disease surveillance.", color: "#1B4F8A", bg: "#EFF6FF", border: "#BFDBFE" },
-                { icon: "🏥", title: "Barangay Health Centers (BHC)", desc: "Serving all 64 barangays of General Trias — the frontline of community health in Cavite.", color: "#0E7C3A", bg: "#F0FDF4", border: "#BBF7D0" },
-                { icon: "🤖", title: "LSTM Machine Learning Model", desc: "Trained on years of CHO morbidity data to forecast disease trends month-by-month for each barangay.", color: "#7C3AED", bg: "#F5F3FF", border: "#DDD6FE" },
+                { icon: "🏛️", title: "City Health Office (CHO)", desc: "General Trias City, Cavite — provides all morbidity records and disease surveillance data for forecasting.", color: "#1B4F8A", bg: "#EFF6FF", border: "#BFDBFE" },
+                { icon: "🏥", title: "Barangay Health Centers (BHCs)", desc: "Present in all 33 barangays — the frontline of community health services in General Trias.", color: "#0E7C3A", bg: "#F0FDF4", border: "#BBF7D0" },
+                { icon: "🤖", title: "LSTM Machine Learning", desc: "Trained on years of CHO data to forecast disease trends month-by-month for each barangay.", color: "#7C3AED", bg: "#F5F3FF", border: "#DDD6FE" },
               ].map((card, i) => (
                 <Box key={i} sx={{ p: 2.5, borderRadius: "12px", backgroundColor: card.bg,
                   border: `1px solid ${card.border}`, display: "flex", alignItems: "flex-start", gap: 2 }}>
@@ -604,9 +601,9 @@ const Landing = ({ onGoToLogin }) => {
       <Container maxWidth="lg" sx={{ pt: { xs: 6, md: 8 }, pb: { xs: 3, md: 4 } }}>
         <Box sx={{ textAlign: "center", mb: 5 }}>
           <Typography sx={{ fontSize: { xs: 22, md: 28 }, fontWeight: 800, color: "#111827", mb: 1, letterSpacing: "-0.5px" }}>
-            Everything CHO & BHC staff need
+            Public Health Insights at Your Fingertips
           </Typography>
-          <Typography sx={{ fontSize: 14, color: "#6B7280" }}>Designed specifically for the health forecasting needs of General Trias City.</Typography>
+          <Typography sx={{ fontSize: 14, color: "#6B7280" }}>Explore disease forecasts and trends for General Trias City.</Typography>
         </Box>
         <Grid container spacing={2.5}>
           {features.map((f, i) => (
@@ -627,6 +624,14 @@ const Landing = ({ onGoToLogin }) => {
       {/* ── Dashboard Preview ── */}
       <Box sx={{ backgroundColor: "#F1F5F9", pt: { xs: 2, md: 3 }, pb: { xs: 4, md: 6 } }}>
         <Container maxWidth="lg">
+          <Box sx={{ mb: 3 }}>
+            <Typography sx={{ fontSize: { xs: 18, md: 22 }, fontWeight: 800, color: "#0F172A", mb: 1 }}>
+              Explore Disease Forecasts
+            </Typography>
+            <Typography sx={{ fontSize: 13.5, color: "#4B5563", mb: 3 }}>
+              View 12-month disease forecasts for all barangays in General Trias. Select a barangay and disease category to see predicted case volumes and trends.
+            </Typography>
+          </Box>
           <DashboardPreview />
         </Container>
       </Box>
@@ -634,10 +639,10 @@ const Landing = ({ onGoToLogin }) => {
       {/* ── Footer ── */}
       <Box sx={{ backgroundColor: "#0A0F1A", py: 3, textAlign: "center", px: 3 }}>
         <Typography sx={{ fontSize: 12, color: "rgba(255,255,255,0.18)", mb: 0.5 }}>
-          © 2025 PredictHealth · Barangay Health Forecasting System
+          © PredictHealth · Health Forecasting System
         </Typography>
         <Typography sx={{ fontSize: 11, color: "rgba(255,255,255,0.12)" }}>
-          Data source: City Health Office (CHO), General Trias City, Cavite · For authorized BHC health personnel only
+          Data source: City Health Office Pinagtipunan
         </Typography>
       </Box>
     </Box>
