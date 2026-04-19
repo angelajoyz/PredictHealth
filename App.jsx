@@ -8,6 +8,14 @@ import {
   Box,
 } from "@mui/material";
 import { Close as CloseIcon } from "@mui/icons-material";
+import {
+  BrowserRouter,
+  Routes,
+  Route,
+  Navigate,
+  useNavigate,
+  useLocation,
+} from "react-router-dom";
 
 import Landing from "./Landing";
 import Login from "./Login";
@@ -43,31 +51,33 @@ const theme = createTheme({
   },
 });
 
-const getResetTokenFromUrl = () => {
-  const params = new URLSearchParams(window.location.search);
-  return params.get("token") || null;
+// ── Protected Route wrapper ───────────────────────────────────────────────────
+const ProtectedRoute = ({ children }) => {
+  const token = localStorage.getItem("token");
+  if (!token) return <Navigate to="/" replace />;
+  return children;
 };
 
-function App() {
-  const resetToken = getResetTokenFromUrl();
+// ── Inner App (inside BrowserRouter so hooks work) ────────────────────────────
+const AppInner = () => {
+  const navigate  = useNavigate();
+  const location  = useLocation();
 
-  const [isAuthenticated, setIsAuthenticated] = useState(() => {
-    return !!localStorage.getItem("token");
-  });
-
-  const [currentPage, setCurrentPage] = useState(() => {
-    if (window.location.pathname === "/reset-password" && resetToken) return "forgot";
-    if (window.location.pathname === "/verify-email") return "verify-email";
-    if (!!localStorage.getItem("token")) {
-      return localStorage.getItem("currentPage") || "dashboard";
-    }
-    localStorage.removeItem("currentPage");
-    return "landing";
-  });
-
+  const [isAuthenticated, setIsAuthenticated] = useState(
+    () => !!localStorage.getItem("token")
+  );
   const [loginModalOpen, setLoginModalOpen] = useState(false);
   const [forgotInModal,  setForgotInModal]  = useState(false);
 
+  const [uploadedFile, setUploadedFile] = useState(null);
+  const [uploadedData, setUploadedData] = useState(() => {
+    try {
+      const saved = localStorage.getItem("uploadedData");
+      return saved ? JSON.parse(saved) : null;
+    } catch { return null; }
+  });
+
+  // Validate token on mount
   useEffect(() => {
     if (isAuthenticated) {
       getCurrentUser()
@@ -81,21 +91,7 @@ function App() {
     }
   }, [isAuthenticated]);
 
-  const [uploadedFile, setUploadedFile] = useState(null);
-  const [uploadedData, setUploadedData] = useState(() => {
-    try {
-      const saved = localStorage.getItem("uploadedData");
-      return saved ? JSON.parse(saved) : null;
-    } catch { return null; }
-  });
-
-  const handleNavigate = (page) => {
-    localStorage.setItem("currentPage", page);
-    setCurrentPage(page);
-  };
-
   const handleLogout = () => {
-    localStorage.removeItem("currentPage");
     localStorage.removeItem("token");
     localStorage.removeItem("username");
     localStorage.removeItem("role");
@@ -110,7 +106,7 @@ function App() {
     setUploadedFile(null);
     setUploadedData(null);
     setIsAuthenticated(false);
-    setCurrentPage("landing");
+    navigate("/", { replace: true });
   };
 
   const handleDataUploaded = (data) => {
@@ -123,6 +119,7 @@ function App() {
     });
   };
 
+  // ── Modal helpers ────────────────────────────────────────────────────────
   const openLoginModal = () => {
     setForgotInModal(false);
     setLoginModalOpen(true);
@@ -137,19 +134,31 @@ function App() {
     setIsAuthenticated(true);
     setLoginModalOpen(false);
     setForgotInModal(false);
-    handleNavigate("dashboard");
+    navigate("/app/dashboard", { replace: true });
   };
 
+  // ── Public navigation (browse without login) ─────────────────────────────
   const handlePublicNavigate = (page) => {
     if (page === "login") {
       openLoginModal();
     } else if (page === "dashboard") {
-      setCurrentPage("browse");
+      navigate("/browse");
     } else if (page === "prediction") {
-      setCurrentPage("browse-prediction");
+      navigate("/browse/prediction");
     } else {
       openLoginModal();
     }
+  };
+
+  // ── Authenticated navigation ─────────────────────────────────────────────
+  const handleNavigate = (page) => {
+    const map = {
+      dashboard:  "/app/dashboard",
+      history:    "/app/history",
+      dataimport: "/app/dataimport",
+      prediction: "/app/prediction",
+    };
+    if (map[page]) navigate(map[page]);
   };
 
   const sharedProps = {
@@ -159,7 +168,7 @@ function App() {
     uploadedData: uploadedData,
   };
 
-  // ── Login modal ────────────────────────────────────────────────────────────
+  // ── Login Modal ──────────────────────────────────────────────────────────
   const LoginModal = () => (
     <Dialog
       open={loginModalOpen}
@@ -175,7 +184,6 @@ function App() {
         },
       }}
     >
-      {/* Close button */}
       <Box sx={{ position: "absolute", top: 10, right: 10, zIndex: 10 }}>
         <IconButton
           onClick={closeLoginModal}
@@ -189,7 +197,6 @@ function App() {
           <CloseIcon sx={{ fontSize: 16 }} />
         </IconButton>
       </Box>
-
       <DialogContent sx={{ p: 0 }}>
         {forgotInModal ? (
           <ForgotPassword
@@ -208,62 +215,118 @@ function App() {
   );
 
   return (
-    <ThemeProvider theme={theme}>
-      <CssBaseline />
-
+    <>
       <LoginModal />
 
-      <div>
-        {currentPage === "landing" && (
-          <Landing
-            onGoToLogin={openLoginModal}
-            onBrowse={() => setCurrentPage("browse")}
-          />
-        )}
+      <Routes>
 
-        {currentPage === "browse" && (
-          <Dashboard
-            onNavigate={handlePublicNavigate}
-            onLogout={openLoginModal}
-            isPublic={true}
-          />
-        )}
+        {/* ── Public pages ── */}
+        <Route
+          path="/"
+          element={
+            isAuthenticated
+              ? <Navigate to="/app/dashboard" replace />
+              : <Landing onGoToLogin={openLoginModal} onBrowse={() => navigate("/browse")} />
+          }
+        />
 
-        {currentPage === "browse-prediction" && (
-          <Prediction
-            onNavigate={handlePublicNavigate}
-            onLogout={openLoginModal}
-            isPublic={true}
-          />
-        )}
+        <Route
+          path="/browse"
+          element={
+            <Dashboard
+              onNavigate={handlePublicNavigate}
+              onLogout={openLoginModal}
+              isPublic={true}
+            />
+          }
+        />
 
-        {currentPage === "verify-email" && (
-          <VerifyEmail
-            onGoToLogin={() => {
-              window.history.replaceState({}, "", "/");
-              openLoginModal();
-              setCurrentPage("landing");
-            }}
-          />
-        )}
+        <Route
+          path="/browse/prediction"
+          element={
+            <Prediction
+              onNavigate={handlePublicNavigate}
+              onLogout={openLoginModal}
+              isPublic={true}
+            />
+          }
+        />
 
-        {currentPage === "forgot" && (
-          <ForgotPassword
-            token={resetToken}
-            onBack={() => {
-              if (resetToken) window.history.replaceState({}, "", "/");
-              setCurrentPage("landing");
-            }}
-          />
-        )}
+        <Route
+          path="/verify-email"
+          element={
+            <VerifyEmail
+              onGoToLogin={() => {
+                openLoginModal();
+                navigate("/", { replace: true });
+              }}
+            />
+          }
+        />
 
-        {currentPage === "dashboard"  && <Dashboard  {...sharedProps} />}
-        {currentPage === "history"    && <History    {...sharedProps} />}
-        {currentPage === "dataimport" && (
-          <DataImport {...sharedProps} onDataUploaded={handleDataUploaded} />
-        )}
-        {currentPage === "prediction" && <Prediction {...sharedProps} />}
-      </div>
+        <Route
+          path="/reset-password"
+          element={
+            <ForgotPassword
+              token={new URLSearchParams(location.search).get("token")}
+              onBack={() => navigate("/", { replace: true })}
+            />
+          }
+        />
+
+        {/* ── Authenticated pages ── */}
+        <Route
+          path="/app/dashboard"
+          element={
+            <ProtectedRoute>
+              <Dashboard {...sharedProps} />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/app/history"
+          element={
+            <ProtectedRoute>
+              <History {...sharedProps} />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/app/dataimport"
+          element={
+            <ProtectedRoute>
+              <DataImport {...sharedProps} onDataUploaded={handleDataUploaded} />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/app/prediction"
+          element={
+            <ProtectedRoute>
+              <Prediction {...sharedProps} />
+            </ProtectedRoute>
+          }
+        />
+
+        {/* ── Fallback ── */}
+        <Route path="*" element={<Navigate to="/" replace />} />
+
+      </Routes>
+    </>
+  );
+};
+
+// ── Root App ──────────────────────────────────────────────────────────────────
+function App() {
+  return (
+    <ThemeProvider theme={theme}>
+      <CssBaseline />
+      <BrowserRouter>
+        <AppInner />
+      </BrowserRouter>
     </ThemeProvider>
   );
 }
