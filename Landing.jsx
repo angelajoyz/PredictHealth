@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import {
   Box, Typography, Button, Container, Grid, Card, CardContent,
+  CircularProgress,
 } from "@mui/material";
 import {
   Psychology as PsychologyIcon,
@@ -8,25 +9,22 @@ import {
   TrendingUp as TrendingUpIcon,
   Group as GroupIcon,
   BarChart as BarChartIcon,
-  ArrowForward as ArrowForwardIcon,
   MedicalServices as MedicalServicesIcon,
-  Lock as LockIcon,
-  OpenInFull as OpenInFullIcon,
   CheckCircle as CheckCircleIcon,
   KeyboardArrowDown as ArrowDownIcon,
 } from "@mui/icons-material";
 import {
-  ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid,
+  LineChart, Line, XAxis, YAxis, CartesianGrid,
   Tooltip as RechartsTooltip, ResponsiveContainer,
 } from "recharts";
+
+const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 const T = {
   blue:      "#2563EB",
   blueMid:   "#1D4ED8",
   blueDim:   "#EFF6FF",
-  blueLight: "#4A90D9",
-  sidebarBg: "#162032",
   border:    "#E2E8F0",
   textHead:  "#0F172A",
   textMuted: "#64748B",
@@ -34,38 +32,57 @@ const T = {
   ok:        "#22C55E",
   okBg:      "#F0FDF4",
   okBorder:  "#BBF7D0",
-  danger:    "#EF4444",
-  dangerBg:  "#FEF2F2",
 };
 
-// ── Static forecast data (realistic GenTri numbers) ───────────────────────────
-const CHART_DATA = [
-  { month: "Jan", predicted: 108 },
-  { month: "Feb", predicted: 103 },
-  { month: "Mar", predicted: 112 },
-  { month: "Apr", predicted: 121, actual: 121 },
-  { month: "May", predicted: 146 },
-  { month: "Jun", predicted: 158 },
-  { month: "Jul", predicted: 162 },
-  { month: "Aug", predicted: 160 },
-  { month: "Sep", predicted: 155 },
-  { month: "Oct", predicted: 158 },
-  { month: "Nov", predicted: 161 },
-  { month: "Dec", predicted: 163 },
-];
+// ── Disease label map ─────────────────────────────────────────────────────────
+const DISEASE_LABELS = {
+  respiratory_cases:           "Respiratory",
+  dengue_cases:                "Dengue",
+  tuberculosis_cases:          "Tuberculosis",
+  diarrhea_cases:              "Diarrhea",
+  hypertension_cases:          "Hypertension",
+  diabetes_cases:              "Diabetes",
+  pneumonia_cases:             "Pneumonia",
+  covid_cases:                 "COVID-19",
+  cardiovascular_cases:        "Cardiovascular",
+  gastrointestinal_cases:      "Gastrointestinal",
+  malnutrition_cases:          "Malnutrition",
+  malnutrition_prevalence_pct: "Malnutrition %",
+  urinary_cases:               "Urinary/Renal",
+  skin_cases:                  "Skin Disease",
+  musculoskeletal_cases:       "Musculoskeletal",
+  injury_cases:                "Injury/Trauma",
+  infectious_cases:            "Other Infectious",
+  viral_infection_cases:       "Viral Infection",
+  blood_metabolic_cases:       "Blood/Metabolic",
+  neurological_cases:          "Neurological",
+  sensory_cases:               "Eye/Ear",
+  mental_health_cases:         "Mental Health",
+  maternal_cases:              "Maternal/OB",
+  neoplasm_cases:              "Neoplasm/Cancer",
+  leptospirosis_cases:         "Leptospirosis",
+};
 
-const TREND_RESULTS = [
-  { type: "warning",    text: "16 disease categories are trending upward simultaneously — consider prioritizing resources." },
-  { type: "increasing", text: "Respiratory cases are projected to increase by +48.1% in all barangays — increased monitoring recommended." },
-  { type: "increasing", text: "Dengue cases are projected to increase by +22.3% in all barangays — increased monitoring recommended." },
-  { type: "stable",     text: "Tuberculosis cases are expected to remain stable in all barangays." },
-  { type: "decreasing", text: "Diarrhea cases are projected to decline by -11.2% in all barangays — positive outlook." },
-];
+const getLabel = (col) =>
+  DISEASE_LABELS[col] ||
+  col.replace(/_cases$/, "").replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase());
 
 const trendBg     = (t) => t === "increasing" ? "#FEF2F2" : t === "decreasing" ? "#F0FDF4" : t === "warning" ? "#FFFBEB" : "#F9FAFB";
 const trendBorder = (t) => t === "increasing" ? "#FECACA" : t === "decreasing" ? "#BBF7D0" : t === "warning" ? "#FDE68A" : "#E5E7EB";
 const trendColor  = (t) => t === "increasing" ? "#EF4444" : t === "decreasing" ? "#22C55E" : t === "warning" ? "#F59E0B" : "#64748B";
 const trendIcon   = (t) => t === "increasing" ? "↑" : t === "decreasing" ? "↓" : t === "warning" ? "⚠" : "—";
+
+const getTrend = (preds) => {
+  if (!preds || preds.length < 2) return "stable";
+  const diff = preds[preds.length - 1] - preds[0];
+  return diff > 0.5 ? "increasing" : diff < -0.5 ? "decreasing" : "stable";
+};
+
+const getPct = (preds) => {
+  if (!preds || preds.length < 2 || !preds[0]) return null;
+  const pct = ((preds[preds.length - 1] - preds[0]) / preds[0]) * 100;
+  return (pct >= 0 ? "+" : "") + pct.toFixed(1) + "%";
+};
 
 // ── Stat Card ─────────────────────────────────────────────────────────────────
 const StatCard = ({ label, icon, topColor, value, valueSub, sub }) => (
@@ -84,7 +101,7 @@ const StatCard = ({ label, icon, topColor, value, valueSub, sub }) => (
       </Box>
     </Box>
     <Box sx={{ display: "flex", alignItems: "baseline", gap: 0.5 }}>
-      <Typography sx={{ fontSize: 24, fontWeight: 700, color: T.textHead, lineHeight: 1, letterSpacing: "-0.5px" }}>
+      <Typography sx={{ fontSize: 22, fontWeight: 700, color: T.textHead, lineHeight: 1, letterSpacing: "-0.5px" }}>
         {value}
       </Typography>
       {valueSub && (
@@ -101,7 +118,7 @@ const ComboTooltip = ({ active, payload, label }) => {
   return (
     <Box sx={{ backgroundColor: "#fff", border: `1px solid ${T.border}`, borderRadius: "8px",
       p: "10px 14px", boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }}>
-      <Typography sx={{ fontSize: 11.5, fontWeight: 600, color: T.textHead, mb: 0.5 }}>{label} 2026</Typography>
+      <Typography sx={{ fontSize: 11.5, fontWeight: 600, color: T.textHead, mb: 0.5 }}>{label}</Typography>
       {payload.map((entry, i) => (
         <Box key={i} sx={{ display: "flex", alignItems: "center", gap: 1, mt: 0.25 }}>
           <Box sx={{ width: 8, height: 8, borderRadius: "50%", backgroundColor: entry.color }} />
@@ -113,131 +130,320 @@ const ComboTooltip = ({ active, payload, label }) => {
   );
 };
 
-// ── Dashboard Preview Mockup ──────────────────────────────────────────────────
-const DashboardPreview = () => (
-  <Box sx={{ backgroundColor: "#F8FAFC", p: "18px 18px 0", display: "flex", flexDirection: "column", gap: "11px" }}>
+// ── Dashboard Preview ─────────────────────────────────────────────────────────
+const DashboardPreview = () => {
+  const [barangays,      setBarangays]      = useState([]);
+  const [selectedBrgy,   setSelectedBrgy]   = useState("__ALL__");
+  const [selectedDisease, setSelectedDisease] = useState("__ALL__");
+  const [forecastData,   setForecastData]   = useState(null);
+  const [cityLabel,      setCityLabel]      = useState("");
+  const [loading,        setLoading]        = useState(true);
+  const [brgyOpen,       setBrgyOpen]       = useState(false);
+  const [diseaseOpen,    setDiseaseOpen]    = useState(false);
 
-    {/* Controls bar */}
-    <Box sx={{ p: "11px 14px", borderRadius: "10px", backgroundColor: "#fff", border: `1px solid ${T.border}` }}>
-      <Box sx={{ display: "flex", alignItems: "center", gap: 2, flexWrap: "wrap" }}>
-        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-          <Typography sx={{ fontSize: 12, color: T.textMuted, fontWeight: 500 }}>Barangay:</Typography>
-          <Box sx={{ display: "flex", alignItems: "center", gap: 0.5,
-            border: `1px solid ${T.border}`, borderRadius: "8px", px: 1.25, py: "5px", backgroundColor: "#fff" }}>
-            <Typography sx={{ fontSize: 12.5, color: T.textHead }}>All Barangays</Typography>
-            <ArrowDownIcon sx={{ fontSize: 14, color: T.textFaint }} />
-          </Box>
-        </Box>
-        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-          <Typography sx={{ fontSize: 12, color: T.textMuted, fontWeight: 500 }}>Disease:</Typography>
-          <Box sx={{ display: "flex", alignItems: "center", gap: 0.5,
-            border: `1px solid ${T.border}`, borderRadius: "8px", px: 1.25, py: "5px", backgroundColor: "#fff" }}>
-            <Typography sx={{ fontSize: 12.5, color: T.textHead }}>All Categories</Typography>
-            <ArrowDownIcon sx={{ fontSize: 14, color: T.textFaint }} />
-          </Box>
-        </Box>
-        {/* Locked generate button */}
-        <Box sx={{ ml: "auto", display: "flex", alignItems: "center", gap: 0.75,
-          px: 2, py: "7px", borderRadius: "8px",
-          backgroundColor: "#E2E8F0", border: "1px solid #CBD5E1", cursor: "not-allowed" }}>
-          <LockIcon sx={{ fontSize: 13, color: T.textFaint }} />
-          <Typography sx={{ fontSize: 12.5, fontWeight: 600, color: T.textFaint }}>Generate</Typography>
-        </Box>
-      </Box>
-    </Box>
+  // Fetch dataset info (barangay list + city)
+  useEffect(() => {
+    fetch(`${API_BASE_URL}/public/dataset-info`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.barangays?.length) setBarangays(d.barangays);
+        if (d.city)              setCityLabel(d.city);
+      })
+      .catch(() => {});
+  }, []);
 
-    {/* Status banner */}
-    <Box sx={{ display: "flex", alignItems: "center", gap: 1, px: 2, py: 1,
-      borderRadius: "8px", backgroundColor: T.okBg, border: `1px solid ${T.okBorder}` }}>
-      <CheckCircleIcon sx={{ fontSize: 14, color: T.ok }} />
-      <Typography sx={{ fontSize: 12.5, color: "#1E293B" }}>
-        Showing forecast for <strong>All Barangays</strong>
-      </Typography>
-    </Box>
+  // Fetch forecast whenever barangay selection changes
+  useEffect(() => {
+    setLoading(true);
+    setForecastData(null);
+    setSelectedDisease("__ALL__"); // reset disease on barangay change
+    fetch(`${API_BASE_URL}/public/forecast?barangay=${encodeURIComponent(selectedBrgy)}`)
+      .then((r) => r.json())
+      .then((d) => { if (!d.not_found) setForecastData(d); })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [selectedBrgy]);
 
-    {/* Stat cards row */}
-    <Box sx={{ display: "flex", gap: "10px" }}>
-      <StatCard label="Location"        topColor={T.blue}    value="GENERAL TRIAS"  sub="All Barangays"
-        icon={<LocationOnIcon sx={{ fontSize: 14, color: T.blue }} />} />
-      <StatCard label="This Month"      topColor={T.blue}    value="121"             sub="April 2026"
-        icon={<GroupIcon sx={{ fontSize: 14, color: T.blue }} />} />
-      <StatCard label="Next Month"      topColor="#EF4444"   value="146"             sub="May 2026"
-        icon={<TrendingUpIcon sx={{ fontSize: 14, color: "#EF4444" }} />} />
-      <StatCard label="Forecast Period" topColor={T.ok}      value="12" valueSub=" Months" sub="2026-01 – 2026-12"
-        icon={<BarChartIcon sx={{ fontSize: 14, color: T.ok }} />} />
-    </Box>
+  // Derived values from real forecast data
+  const forecastDates  = forecastData?.forecast_dates  || [];
+  const predictions    = forecastData?.predictions     || {};
+  const diseaseColumns = forecastData?.disease_columns || Object.keys(predictions);
 
-    {/* Chart card */}
-    <Box sx={{ p: "16px 18px 12px", borderRadius: "10px", backgroundColor: "#fff", border: `1px solid ${T.border}` }}>
-      <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 1.5 }}>
-        <Typography sx={{ fontSize: 13, fontWeight: 600, color: T.textHead }}>Predicted Patient Volume</Typography>
-        <Box sx={{ display: "flex", alignItems: "center", gap: 0.75, px: "10px", py: "3px",
-          borderRadius: "20px", backgroundColor: `${T.blue}18`, border: `1px solid ${T.blue}40` }}>
-          <Box sx={{ width: 8, height: 8, borderRadius: "50%", backgroundColor: T.blue }} />
-          <Typography sx={{ fontSize: 11.5, fontWeight: 600, color: T.blue }}>All Categories</Typography>
-        </Box>
-      </Box>
-      <ResponsiveContainer width="100%" height={175}>
-        <ComposedChart data={CHART_DATA} margin={{ top: 4, right: 8, left: -14, bottom: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" vertical={false} />
-          <XAxis dataKey="month" axisLine={false} tickLine={false}
-            style={{ fontSize: 10, fill: T.textFaint }} />
-          <YAxis axisLine={false} tickLine={false} domain={[0, 200]}
-            style={{ fontSize: 10, fill: T.textFaint }} />
-          <RechartsTooltip content={<ComboTooltip />} />
-          <Bar dataKey="actual" name="Actual" fill={T.blue} fillOpacity={0.8}
-            radius={[3,3,0,0]} maxBarSize={22} isAnimationActive={false} />
-          <Line type="monotone" dataKey="predicted" name="Predicted" stroke={T.blue}
-            strokeWidth={2} strokeDasharray="5 3"
-            dot={{ fill: T.blue, r: 2.5, strokeWidth: 0 }}
-            activeDot={{ r: 4, fill: T.blue, stroke: "#fff", strokeWidth: 2 }}
-            connectNulls isAnimationActive={false} />
-        </ComposedChart>
-      </ResponsiveContainer>
-      {/* Legend */}
-      <Box sx={{ display: "flex", justifyContent: "center", gap: 2, mt: 1 }}>
-        <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-          <Box sx={{ width: 10, height: 10, borderRadius: "2px", backgroundColor: T.blue, opacity: 0.8 }} />
-          <Typography sx={{ fontSize: 11, color: T.textMuted }}>Actual</Typography>
-        </Box>
-        <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-          <Box sx={{ width: 18, height: 2, borderRadius: 1, backgroundColor: T.blue,
-            backgroundImage: `repeating-linear-gradient(90deg,${T.blue} 0,${T.blue} 5px,transparent 5px,transparent 8px)` }} />
-          <Typography sx={{ fontSize: 11, color: T.textMuted }}>Predicted</Typography>
-        </Box>
-      </Box>
-    </Box>
+  // Active columns based on disease selection
+  const activeCols = selectedDisease === "__ALL__" ? diseaseColumns : [selectedDisease];
 
-    {/* Results / interpretation */}
-    <Box sx={{ p: "16px 18px", borderRadius: "10px 10px 0 0", backgroundColor: "#fff",
-      border: `1px solid ${T.border}`, borderBottom: "none" }}>
-      <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 1.5 }}>
-        <Typography sx={{ fontSize: 13, fontWeight: 600, color: T.textHead }}>Results</Typography>
-        <Typography sx={{ fontSize: 11.5, color: T.textMuted }}>All Categories · All Barangays</Typography>
-      </Box>
-      <Box sx={{ display: "flex", flexDirection: "column", gap: "7px" }}>
-        {TREND_RESULTS.map((item, i) => (
-          <Box key={i} sx={{
-            display: "flex", alignItems: "center", gap: 1.5, p: "9px 12px",
-            borderRadius: "8px", backgroundColor: trendBg(item.type),
-            border: `1px solid ${trendBorder(item.type)}`,
-          }}>
-            <Box sx={{ width: 24, height: 24, borderRadius: "50%", flexShrink: 0,
-              backgroundColor: trendBg(item.type),
-              border: `1px solid ${trendBorder(item.type)}`,
-              display: "flex", alignItems: "center", justifyContent: "center",
-              fontSize: 11, fontWeight: 700, color: trendColor(item.type) }}>
-              {trendIcon(item.type)}
+  // Sum active diseases per month for chart
+  const chartData = forecastDates.map((date, i) => {
+    const total = activeCols.reduce((sum, d) => sum + ((predictions[d] || [])[i] || 0), 0);
+    return { month: date.slice(0, 7), predicted: Math.round(total) };
+  });
+
+  // Current & next month values
+  const now        = new Date();
+  const currentKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const nextKey    = `${now.getFullYear()}-${String(now.getMonth() + 2).padStart(2, "0")}`;
+  const currentIdx = forecastDates.findIndex((d) => d.slice(0, 7) === currentKey);
+  const nextIdx    = forecastDates.findIndex((d) => d.slice(0, 7) === nextKey);
+  const getSum = (idx) =>
+    idx >= 0
+      ? Math.round(activeCols.reduce((s, d) => s + ((predictions[d] || [])[idx] || 0), 0))
+      : null;
+  const thisMonthVal = getSum(currentIdx) ?? (chartData[0]?.predicted ?? null);
+  const nextMonthVal = getSum(nextIdx)    ?? (chartData[1]?.predicted ?? null);
+  const currentLabel = now.toLocaleDateString("en-PH", { month: "long", year: "numeric" });
+  const nextDate     = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  const nextLabel    = nextDate.toLocaleDateString("en-PH", { month: "long", year: "numeric" });
+
+  const forecastPeriodLabel = forecastDates.length
+    ? `${forecastDates[0].slice(0, 7)} – ${forecastDates[forecastDates.length - 1].slice(0, 7)}`
+    : "—";
+
+  // Build trend results
+  const buildTrends = () => {
+    if (!forecastData || diseaseColumns.length === 0) return [];
+    const items = [];
+    const increasing = [];
+    const targetCols = selectedDisease === "__ALL__" ? diseaseColumns : [selectedDisease];
+    targetCols.forEach((d) => {
+      const preds = predictions[d] || [];
+      const trend = getTrend(preds);
+      const pct   = getPct(preds);
+      const label = getLabel(d);
+      const loc   = selectedBrgy === "__ALL__" ? "all barangays" : selectedBrgy;
+      if (trend === "increasing") {
+        increasing.push(d);
+        items.push({ type: "increasing", text: `${label} cases are projected to increase${pct ? " by " + pct : ""} in ${loc} — increased monitoring recommended.` });
+      } else if (trend === "decreasing") {
+        items.push({ type: "decreasing", text: `${label} cases are projected to decline${pct ? " by " + pct : ""} in ${loc} — positive outlook.` });
+      } else {
+        items.push({ type: "stable", text: `${label} cases are expected to remain stable in ${loc}.` });
+      }
+    });
+    if (selectedDisease === "__ALL__" && increasing.length >= 2) {
+      items.unshift({ type: "warning", text: `${increasing.length} disease categories are trending upward simultaneously — consider prioritizing resources.` });
+    }
+    return items;
+  };
+
+  const trendItems = buildTrends();
+  const brgyLabel    = selectedBrgy    === "__ALL__" ? "All Barangays" : selectedBrgy;
+  const diseaseLabel = selectedDisease === "__ALL__" ? "All Categories" : getLabel(selectedDisease);
+
+  // Chart legend label
+  const chartLegendLabel = selectedDisease === "__ALL__" ? "All Categories" : getLabel(selectedDisease);
+
+  return (
+    <Box sx={{ backgroundColor: "#F8FAFC", p: "18px", display: "flex", flexDirection: "column", gap: "11px",
+      borderRadius: "12px", border: `1px solid ${T.border}` }}>
+
+      {/* Controls bar */}
+      <Box sx={{ p: "11px 14px", borderRadius: "10px", backgroundColor: "#fff", border: `1px solid ${T.border}` }}>
+        <Box sx={{ display: "flex", alignItems: "center", gap: 2, flexWrap: "wrap" }}>
+
+          {/* Barangay selector */}
+          <Box sx={{ position: "relative" }}>
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+              <Typography sx={{ fontSize: 12, color: T.textMuted, fontWeight: 500 }}>Barangay:</Typography>
+              <Box
+                onClick={() => { setBrgyOpen((p) => !p); setDiseaseOpen(false); }}
+                sx={{ display: "flex", alignItems: "center", gap: 0.5, cursor: "pointer",
+                  border: `1px solid ${T.border}`, borderRadius: "8px", px: 1.25, py: "5px",
+                  backgroundColor: "#fff", "&:hover": { borderColor: T.blue } }}>
+                <Typography sx={{ fontSize: 12.5, color: T.textHead, maxWidth: 160,
+                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {brgyLabel}
+                </Typography>
+                <ArrowDownIcon sx={{ fontSize: 14, color: T.textFaint,
+                  transform: brgyOpen ? "rotate(180deg)" : "none", transition: "transform 0.2s" }} />
+              </Box>
             </Box>
-            <Typography sx={{ fontSize: 12.5, color: "#1E293B", lineHeight: 1.5, flex: 1 }}>
-              {item.text}
-            </Typography>
+            {brgyOpen && (
+              <Box sx={{ position: "absolute", top: "110%", left: 60, zIndex: 50,
+                backgroundColor: "#fff", border: `1px solid ${T.border}`, borderRadius: "8px",
+                boxShadow: "0 8px 24px rgba(0,0,0,0.1)", maxHeight: 220, overflowY: "auto", minWidth: 200 }}>
+                {[{ value: "__ALL__", label: "All Barangays" }, ...barangays.map((b) => ({ value: b, label: b }))].map((opt) => (
+                  <Box key={opt.value}
+                    onClick={() => { setSelectedBrgy(opt.value); setBrgyOpen(false); }}
+                    sx={{ px: 2, py: 1.1, fontSize: 12.5,
+                      color: opt.value === selectedBrgy ? T.blue : T.textHead,
+                      fontWeight: opt.value === selectedBrgy ? 600 : 400,
+                      cursor: "pointer",
+                      backgroundColor: opt.value === selectedBrgy ? T.blueDim : "transparent",
+                      "&:hover": { backgroundColor: "#F8FAFC" } }}>
+                    {opt.label}
+                  </Box>
+                ))}
+              </Box>
+            )}
           </Box>
-        ))}
+
+          {/* Disease selector */}
+          <Box sx={{ position: "relative" }}>
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+              <Typography sx={{ fontSize: 12, color: T.textMuted, fontWeight: 500 }}>Disease:</Typography>
+              <Box
+                onClick={() => { setDiseaseOpen((p) => !p); setBrgyOpen(false); }}
+                sx={{ display: "flex", alignItems: "center", gap: 0.5, cursor: "pointer",
+                  border: `1px solid ${T.border}`, borderRadius: "8px", px: 1.25, py: "5px",
+                  backgroundColor: "#fff", "&:hover": { borderColor: T.blue } }}>
+                <Typography sx={{ fontSize: 12.5, color: T.textHead, maxWidth: 160,
+                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {diseaseLabel}
+                </Typography>
+                <ArrowDownIcon sx={{ fontSize: 14, color: T.textFaint,
+                  transform: diseaseOpen ? "rotate(180deg)" : "none", transition: "transform 0.2s" }} />
+              </Box>
+            </Box>
+            {diseaseOpen && (
+              <Box sx={{ position: "absolute", top: "110%", left: 60, zIndex: 50,
+                backgroundColor: "#fff", border: `1px solid ${T.border}`, borderRadius: "8px",
+                boxShadow: "0 8px 24px rgba(0,0,0,0.1)", maxHeight: 220, overflowY: "auto", minWidth: 200 }}>
+                {[
+                  { value: "__ALL__", label: "All Categories" },
+                  ...diseaseColumns.map((d) => ({ value: d, label: getLabel(d) })),
+                ].map((opt) => (
+                  <Box key={opt.value}
+                    onClick={() => { setSelectedDisease(opt.value); setDiseaseOpen(false); }}
+                    sx={{ px: 2, py: 1.1, fontSize: 12.5,
+                      color: opt.value === selectedDisease ? T.blue : T.textHead,
+                      fontWeight: opt.value === selectedDisease ? 600 : 400,
+                      cursor: "pointer",
+                      backgroundColor: opt.value === selectedDisease ? T.blueDim : "transparent",
+                      "&:hover": { backgroundColor: "#F8FAFC" } }}>
+                    {opt.label}
+                  </Box>
+                ))}
+              </Box>
+            )}
+          </Box>
+
+        </Box>
+      </Box>
+
+      {/* Status banner */}
+      <Box sx={{ display: "flex", alignItems: "center", gap: 1, px: 2, py: 1,
+        borderRadius: "8px", backgroundColor: T.okBg, border: `1px solid ${T.okBorder}` }}>
+        <CheckCircleIcon sx={{ fontSize: 14, color: T.ok }} />
+        <Typography sx={{ fontSize: 12.5, color: "#1E293B" }}>
+          Showing forecast for <strong>{brgyLabel}</strong>
+          {selectedDisease !== "__ALL__" && <> · <strong>{diseaseLabel}</strong></>}
+        </Typography>
+      </Box>
+
+      {/* Stat cards */}
+      <Box sx={{ display: "flex", gap: "10px" }}>
+        <StatCard
+          label="Location" topColor={T.blue}
+          value={cityLabel || "—"} sub={brgyLabel}
+          icon={<LocationOnIcon sx={{ fontSize: 14, color: T.blue }} />}
+        />
+        <StatCard
+          label="This Month" topColor={T.blue}
+          value={loading ? "…" : (thisMonthVal !== null ? thisMonthVal.toLocaleString() : "—")}
+          sub={currentLabel}
+          icon={<GroupIcon sx={{ fontSize: 14, color: T.blue }} />}
+        />
+        <StatCard
+          label="Next Month" topColor="#EF4444"
+          value={loading ? "…" : (nextMonthVal !== null ? nextMonthVal.toLocaleString() : "—")}
+          sub={nextLabel}
+          icon={<TrendingUpIcon sx={{ fontSize: 14, color: "#EF4444" }} />}
+        />
+        <StatCard
+          label="Forecast Period" topColor={T.ok}
+          value={forecastDates.length || "—"}
+          valueSub={forecastDates.length ? " Months" : ""}
+          sub={forecastPeriodLabel}
+          icon={<BarChartIcon sx={{ fontSize: 14, color: T.ok }} />}
+        />
+      </Box>
+
+      {/* Chart */}
+      <Box sx={{ px: 0.5, pt: 1 }}>
+        <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 1.5 }}>
+          <Typography sx={{ fontSize: 13, fontWeight: 600, color: T.textHead }}>Predicted Patient Volume</Typography>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 0.75, px: "10px", py: "3px",
+            borderRadius: "20px", backgroundColor: `${T.blue}18`, border: `1px solid ${T.blue}40` }}>
+            <Box sx={{ width: 8, height: 8, borderRadius: "50%", backgroundColor: T.blue }} />
+            <Typography sx={{ fontSize: 11.5, fontWeight: 600, color: T.blue }}>{chartLegendLabel}</Typography>
+          </Box>
+        </Box>
+
+        {loading ? (
+          <Box sx={{ display: "flex", alignItems: "center", justifyContent: "center", height: 180 }}>
+            <CircularProgress size={24} sx={{ color: T.blue }} />
+          </Box>
+        ) : chartData.length > 0 ? (
+          <ResponsiveContainer width="100%" height={180}>
+            <LineChart data={chartData} margin={{ top: 4, right: 8, left: -14, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" vertical={false} />
+              <XAxis dataKey="month" axisLine={false} tickLine={false}
+                style={{ fontSize: 10, fill: T.textFaint }} />
+              <YAxis axisLine={false} tickLine={false}
+                style={{ fontSize: 10, fill: T.textFaint }} />
+              <RechartsTooltip content={<ComboTooltip />} />
+              <Line type="monotone" dataKey="predicted" name="Predicted" stroke={T.blue}
+                strokeWidth={2} strokeDasharray="5 3"
+                dot={{ fill: T.blue, r: 2.5, strokeWidth: 0 }}
+                activeDot={{ r: 4, fill: T.blue, stroke: "#fff", strokeWidth: 2 }}
+                isAnimationActive={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        ) : (
+          <Box sx={{ display: "flex", alignItems: "center", justifyContent: "center", height: 180 }}>
+            <Typography sx={{ fontSize: 13, color: T.textMuted }}>No forecast data available yet.</Typography>
+          </Box>
+        )}
+
+        <Box sx={{ display: "flex", justifyContent: "center", mt: 0.5 }}>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+            <Box sx={{ width: 18, height: 2, borderRadius: 1,
+              backgroundImage: `repeating-linear-gradient(90deg,${T.blue} 0,${T.blue} 5px,transparent 5px,transparent 8px)` }} />
+            <Typography sx={{ fontSize: 11, color: T.textMuted }}>Predicted</Typography>
+          </Box>
+        </Box>
+      </Box>
+
+      {/* Results */}
+      <Box sx={{ px: 0.5, pb: 1 }}>
+        <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 1.5 }}>
+          <Typography sx={{ fontSize: 13, fontWeight: 600, color: T.textHead }}>Results</Typography>
+          <Typography sx={{ fontSize: 11.5, color: T.textMuted }}>{diseaseLabel} · {brgyLabel}</Typography>
+        </Box>
+
+        {loading ? (
+          <Box sx={{ display: "flex", alignItems: "center", justifyContent: "center", py: 3 }}>
+            <CircularProgress size={20} sx={{ color: T.blue }} />
+          </Box>
+        ) : trendItems.length === 0 ? (
+          <Box sx={{ py: 2, textAlign: "center" }}>
+            <Typography sx={{ fontSize: 13, color: T.textMuted }}>No forecast data available yet.</Typography>
+          </Box>
+        ) : (
+          <Box sx={{ display: "flex", flexDirection: "column", gap: "7px" }}>
+            {trendItems.map((item, i) => (
+              <Box key={i} sx={{
+                display: "flex", alignItems: "center", gap: 1.5, p: "9px 12px",
+                borderRadius: "8px", backgroundColor: trendBg(item.type),
+                border: `1px solid ${trendBorder(item.type)}`,
+              }}>
+                <Box sx={{ width: 24, height: 24, borderRadius: "50%", flexShrink: 0,
+                  backgroundColor: trendBg(item.type), border: `1px solid ${trendBorder(item.type)}`,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: 11, fontWeight: 700, color: trendColor(item.type) }}>
+                  {trendIcon(item.type)}
+                </Box>
+                <Typography sx={{ fontSize: 12.5, color: "#1E293B", lineHeight: 1.5, flex: 1 }}>
+                  {item.text}
+                </Typography>
+              </Box>
+            ))}
+          </Box>
+        )}
       </Box>
     </Box>
-  </Box>
-);
+  );
+};
 
 // ── Animated Counter ──────────────────────────────────────────────────────────
 const Counter = ({ target, suffix = "", duration = 1800 }) => {
@@ -286,7 +492,7 @@ const PredictHealthLogo = ({ size = 36 }) => (
 );
 
 // ── Main Landing ──────────────────────────────────────────────────────────────
-const Landing = ({ onGoToLogin, onBrowse }) => {
+const Landing = ({ onGoToLogin }) => {
   return (
     <Box sx={{ minHeight: "100vh", backgroundColor: "#F4F6F8" }}>
 
@@ -301,25 +507,11 @@ const Landing = ({ onGoToLogin, onBrowse }) => {
             <Typography sx={{ fontSize: 8.5, color: "rgba(255,255,255,0.3)", letterSpacing: "1.2px", textTransform: "uppercase" }}>General Trias · Barangay Health Forecasting</Typography>
           </Box>
         </Box>
-        <Box sx={{ display: { xs: "none", md: "flex" }, alignItems: "center", gap: 1,
-          px: 1.5, py: 0.6, borderRadius: "20px", backgroundColor: "rgba(14,124,58,0.2)", border: "1px solid rgba(14,124,58,0.4)" }}>
-          <Box sx={{ width: 6, height: 6, borderRadius: "50%", backgroundColor: "#4ADE80",
-            animation: "blink 2s infinite", "@keyframes blink": { "0%,100%": { opacity: 1 }, "50%": { opacity: 0.3 } } }} />
-          <Typography sx={{ fontSize: 11, fontWeight: 600, color: "#4ADE80" }}>CHO General Trias — Live Data</Typography>
-        </Box>
-        <Box sx={{ display: "flex", gap: 1.25 }}>
-          <Button onClick={onBrowse} variant="outlined"
-            sx={{ textTransform: "none", fontSize: 12.5, fontWeight: 600, borderRadius: "8px",
-              borderColor: "rgba(255,255,255,0.22)", color: "rgba(255,255,255,0.75)", px: 2,
-              "&:hover": { borderColor: "#fff", color: "#fff", backgroundColor: "rgba(255,255,255,0.07)" } }}>
-            Browse Data
-          </Button>
-          <Button onClick={onGoToLogin} variant="contained"
-            sx={{ textTransform: "none", fontSize: 12.5, fontWeight: 700, borderRadius: "8px",
-              backgroundColor: "#1B4F8A", px: 2.5, "&:hover": { backgroundColor: "#2260A8" } }}>
-            Sign In
-          </Button>
-        </Box>
+        <Button onClick={onGoToLogin} variant="contained"
+          sx={{ textTransform: "none", fontSize: 12.5, fontWeight: 700, borderRadius: "8px",
+            backgroundColor: "#1B4F8A", px: 2.5, "&:hover": { backgroundColor: "#2260A8" } }}>
+          Sign In
+        </Button>
       </Box>
 
       {/* ── Hero ── */}
@@ -347,23 +539,9 @@ const Landing = ({ onGoToLogin, onBrowse }) => {
           <Box component="span" sx={{ color: "#5B9FD4", fontWeight: 600 }}>64 barangays</Box>
           {" "}to support health planning and early intervention.
         </Typography>
-        <Typography sx={{ fontSize: 12, color: "rgba(255,255,255,0.25)", mb: 4.5, fontStyle: "italic" }}>
+        <Typography sx={{ fontSize: 12, color: "rgba(255,255,255,0.25)", fontStyle: "italic" }}>
           Data pinagtipunan ng CHO General Trias para sa mas epektibong serbisyong pangkalusugan.
         </Typography>
-        <Box sx={{ display: "flex", gap: 2, justifyContent: "center", flexWrap: "wrap" }}>
-          <Button onClick={onBrowse} variant="contained" size="large" endIcon={<ArrowForwardIcon />}
-            sx={{ textTransform: "none", fontSize: 14, fontWeight: 700, borderRadius: "10px",
-              px: 4, py: 1.5, backgroundColor: "#1B4F8A", boxShadow: "0 4px 20px rgba(27,79,138,0.45)",
-              "&:hover": { backgroundColor: "#2260A8", transform: "translateY(-1px)" }, transition: "all 0.18s ease" }}>
-            View Public Forecasts
-          </Button>
-          <Button onClick={onGoToLogin} variant="outlined" size="large"
-            sx={{ textTransform: "none", fontSize: 14, fontWeight: 600, borderRadius: "10px",
-              px: 4, py: 1.5, borderColor: "rgba(255,255,255,0.28)", color: "rgba(255,255,255,0.78)",
-              "&:hover": { borderColor: "#fff", color: "#fff" } }}>
-            Sign In to Dashboard
-          </Button>
-        </Box>
       </Box>
 
       {/* ── Stats strip ── */}
@@ -438,7 +616,7 @@ const Landing = ({ onGoToLogin, onBrowse }) => {
       </Box>
 
       {/* ── Features ── */}
-      <Container maxWidth="lg" sx={{ py: { xs: 6, md: 8 } }}>
+      <Container maxWidth="lg" sx={{ pt: { xs: 6, md: 8 }, pb: { xs: 3, md: 4 } }}>
         <Box sx={{ textAlign: "center", mb: 5 }}>
           <Typography sx={{ fontSize: { xs: 22, md: 28 }, fontWeight: 800, color: "#111827", mb: 1, letterSpacing: "-0.5px" }}>
             Everything CHO & BHC staff need
@@ -461,118 +639,11 @@ const Landing = ({ onGoToLogin, onBrowse }) => {
         </Grid>
       </Container>
 
-      {/* ── Live Preview Section ── */}
-      <Box sx={{ backgroundColor: "#F1F5F9", py: { xs: 6, md: 8 } }}>
+      {/* ── Dashboard Preview ── */}
+      <Box sx={{ backgroundColor: "#F1F5F9", pt: { xs: 2, md: 3 }, pb: { xs: 4, md: 6 } }}>
         <Container maxWidth="lg">
-          <Box sx={{ textAlign: "center", mb: 4 }}>
-            <Box sx={{ display: "inline-flex", alignItems: "center", gap: 0.75,
-              px: 1.75, py: 0.6, borderRadius: "20px", mb: 2,
-              backgroundColor: "rgba(37,99,235,0.08)", border: "1px solid rgba(37,99,235,0.2)" }}>
-              <Box sx={{ width: 6, height: 6, borderRadius: "50%", backgroundColor: T.blue }} />
-              <Typography sx={{ fontSize: 11.5, fontWeight: 600, color: T.blue }}>Public Preview</Typography>
-            </Box>
-            <Typography sx={{ fontSize: { xs: 22, md: 28 }, fontWeight: 800, color: "#0F172A", mb: 1, letterSpacing: "-0.5px" }}>
-              This is what the public can see
-            </Typography>
-            <Typography sx={{ fontSize: 14, color: "#6B7280", maxWidth: 500, mx: "auto" }}>
-              Forecast data from CHO General Trias — viewable by anyone. Sign in to unlock per-barangay analysis, export tools, and more.
-            </Typography>
-          </Box>
-
-          {/* Browser frame */}
-          <Box sx={{ borderRadius: "16px", overflow: "hidden", border: "1px solid #CBD5E1",
-            boxShadow: "0 12px 48px rgba(0,0,0,0.12)" }}>
-
-            {/* Browser chrome bar */}
-            <Box sx={{ backgroundColor: "#1E293B", px: 2, py: 1.25,
-              display: "flex", alignItems: "center", gap: 1.5,
-              borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
-              <Box sx={{ display: "flex", gap: 0.6 }}>
-                {["#FF5F57","#FEBC2E","#28C840"].map((c, i) => (
-                  <Box key={i} sx={{ width: 11, height: 11, borderRadius: "50%", backgroundColor: c }} />
-                ))}
-              </Box>
-              <Box sx={{ flex: 1, mx: 2, py: 0.5, px: 1.5, borderRadius: "6px",
-                backgroundColor: "rgba(255,255,255,0.07)", display: "flex", alignItems: "center", gap: 0.75 }}>
-                <Box sx={{ width: 7, height: 7, borderRadius: "50%", backgroundColor: "#4ADE80" }} />
-                <Typography sx={{ fontSize: 11, color: "rgba(255,255,255,0.4)", fontFamily: "monospace" }}>
-                  predicthealth.app/browse  ·  CHO General Trias
-                </Typography>
-              </Box>
-              <Button onClick={onBrowse} size="small" startIcon={<OpenInFullIcon sx={{ fontSize: 11 }} />}
-                sx={{ textTransform: "none", fontSize: 11, fontWeight: 600, borderRadius: "6px",
-                  color: "rgba(255,255,255,0.6)", border: "1px solid rgba(255,255,255,0.15)",
-                  px: 1.25, py: 0.35, minWidth: "auto",
-                  "&:hover": { backgroundColor: "rgba(255,255,255,0.08)", color: "#fff" } }}>
-                Open Full View
-              </Button>
-            </Box>
-
-            {/* Dashboard mockup */}
-            <DashboardPreview />
-
-            {/* Fade + CTA */}
-            <Box sx={{ backgroundColor: "#F8FAFC", px: 3, pb: 3, pt: 0, textAlign: "center" }}>
-              <Box sx={{ height: 60, background: "linear-gradient(to bottom, transparent, #F8FAFC)",
-                mt: "-60px", position: "relative", zIndex: 1 }} />
-              <Box sx={{ display: "inline-flex", flexDirection: "column", alignItems: "center", gap: 1.5,
-                p: "18px 28px", borderRadius: "14px", backgroundColor: "#fff",
-                border: "1px solid #E2E8F0", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", maxWidth: 440 }}>
-                <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                  <LockIcon sx={{ fontSize: 15, color: T.blue }} />
-                  <Typography sx={{ fontSize: 13.5, fontWeight: 700, color: "#0F172A" }}>
-                    Full access requires sign in
-                  </Typography>
-                </Box>
-                <Typography sx={{ fontSize: 12.5, color: "#6B7280", textAlign: "center", lineHeight: 1.65 }}>
-                  View per-barangay forecasts, age & sex breakdowns, export reports, and more — available to authorized CHO & BHC staff.
-                </Typography>
-                <Box sx={{ display: "flex", gap: 1.5 }}>
-                  <Button onClick={onBrowse} variant="outlined" size="small"
-                    sx={{ textTransform: "none", fontSize: 12.5, fontWeight: 600, borderRadius: "8px",
-                      borderColor: "#CBD5E1", color: "#374151", px: 2,
-                      "&:hover": { borderColor: T.blue, color: T.blue } }}>
-                    Browse Public Data
-                  </Button>
-                  <Button onClick={onGoToLogin} variant="contained" size="small"
-                    endIcon={<ArrowForwardIcon sx={{ fontSize: 13 }} />}
-                    sx={{ textTransform: "none", fontSize: 12.5, fontWeight: 700, borderRadius: "8px",
-                      backgroundColor: T.blue, px: 2, "&:hover": { backgroundColor: T.blueMid } }}>
-                    Sign In
-                  </Button>
-                </Box>
-              </Box>
-            </Box>
-          </Box>
+          <DashboardPreview />
         </Container>
-      </Box>
-
-      {/* ── CTA ── */}
-      <Box sx={{ backgroundColor: "#162032", py: { xs: 7, md: 9 }, textAlign: "center", px: 3 }}>
-        <Box sx={{ display: "inline-flex", alignItems: "center", gap: 0.75,
-          px: 1.75, py: 0.6, borderRadius: "20px", mb: 2.5,
-          backgroundColor: "rgba(74,144,217,0.12)", border: "1px solid rgba(74,144,217,0.25)" }}>
-          <Typography sx={{ fontSize: 12, color: "#4A90D9", fontWeight: 600 }}>🏙️ General Trias City, Cavite</Typography>
-        </Box>
-        <Typography sx={{ fontSize: { xs: 22, md: 28 }, fontWeight: 800, color: "rgba(255,255,255,0.93)", mb: 1.25, letterSpacing: "-0.5px" }}>
-          Ready to explore the health data?
-        </Typography>
-        <Typography sx={{ fontSize: 14, color: "rgba(255,255,255,0.38)", mb: 3.5, maxWidth: 460, mx: "auto", lineHeight: 1.7 }}>
-          Browse public forecasts from CHO General Trias — or sign in to access the full BHC dashboard and analysis tools.
-        </Typography>
-        <Box sx={{ display: "flex", gap: 2, justifyContent: "center", flexWrap: "wrap" }}>
-          <Button onClick={onBrowse} variant="contained"
-            sx={{ textTransform: "none", fontSize: 13.5, fontWeight: 700, borderRadius: "9px",
-              px: 3.5, py: 1.25, backgroundColor: "#1B4F8A", "&:hover": { backgroundColor: "#2260A8" } }}>
-            Browse CHO Data
-          </Button>
-          <Button onClick={onGoToLogin} variant="outlined"
-            sx={{ textTransform: "none", fontSize: 13.5, fontWeight: 600, borderRadius: "9px",
-              px: 3.5, py: 1.25, borderColor: "rgba(255,255,255,0.28)", color: "rgba(255,255,255,0.78)",
-              "&:hover": { borderColor: "#fff", color: "#fff" } }}>
-            Sign In — BHC Staff
-          </Button>
-        </Box>
       </Box>
 
       {/* ── Footer ── */}
