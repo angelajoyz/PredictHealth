@@ -471,9 +471,9 @@ const stats = [
 const features = [
   { icon: <PsychologyIcon sx={{ fontSize: 28, color: "#4A90D9" }} />, title: "LSTM-Based Disease Forecasting", desc: "Predicts disease case volumes up to 12 months ahead using time-series machine learning trained on General Trias health records." },
   { icon: <LocationOnIcon sx={{ fontSize: 28, color: "#4A90D9" }} />, title: "Per-Barangay Analysis", desc: "Explore forecasts for each of the 33 barangays in General Trias for localized health insights." },
-  { icon: <TrendingUpIcon sx={{ fontSize: 28, color: "#4A90D9" }} />, title: "Multi-Disease Monitoring", desc: "Track dengue, respiratory illness, tuberculosis, hypertension, diarrhea, and more — all sourced from CHO General Trias records." },
+  { icon: <TrendingUpIcon sx={{ fontSize: 28, color: "#4A90D9" }} />, title: "Multi-Disease Monitoring", desc: "Track dengue, respiratory illness, tuberculosis, hypertension, diarrhea, and more — all sourced from CHO records." },
   { icon: <GroupIcon sx={{ fontSize: 28, color: "#4A90D9" }} />, title: "Select by Disease Category", desc: "Filter forecasts by specific disease types or view all categories together." },
-  { icon: <BarChartIcon sx={{ fontSize: 28, color: "#4A90D9" }} />, title: "Trend Analysis", desc: "View historical trends and forecasted patterns to understand disease progression and seasonal variations." },
+  { icon: <BarChartIcon sx={{ fontSize: 28, color: "#4A90D9" }} />, title: "Trend Analysis", desc: "View health trends and forecasted patterns to understand disease progression and seasonal variations." },
   { icon: <MedicalServicesIcon sx={{ fontSize: 28, color: "#4A90D9" }} />, title: "Data from CHO General Trias", desc: "All forecasts are based on official morbidity records from the City Health Office Pinagtipunan of General Trias." },
 ];
 
@@ -507,11 +507,6 @@ const Landing = ({ onGoToLogin }) => {
             <Typography sx={{ fontSize: 8.5, color: "rgba(255,255,255,0.3)", letterSpacing: "1.2px", textTransform: "uppercase" }}>General Trias · Disease Forecasting System</Typography>
           </Box>
         </Box>
-        <Button onClick={onGoToLogin} variant="contained"
-          sx={{ textTransform: "none", fontSize: 12.5, fontWeight: 700, borderRadius: "8px",
-            backgroundColor: "#1B4F8A", px: 2.5, "&:hover": { backgroundColor: "#2260A8" } }}>
-          Sign In
-        </Button>
       </Box>
 
       {/* ── Hero ── */}
@@ -528,7 +523,7 @@ const Landing = ({ onGoToLogin }) => {
         </Box>
         <Typography sx={{ fontSize: { xs: 26, md: 44 }, fontWeight: 800,
           color: "rgba(255,255,255,0.93)", letterSpacing: "-1px", lineHeight: 1.18, mb: 2 }}>
-          Public Health Forecasting<br />
+            Health Trends Forecasting<br />
           <Box component="span" sx={{ color: "#5B9FD4" }}>for General Trias City</Box>
         </Typography>
         <Typography sx={{ fontSize: { xs: 13, md: 15 }, color: "rgba(255,255,255,0.42)",
@@ -541,8 +536,6 @@ const Landing = ({ onGoToLogin }) => {
         </Typography>
       </Box>
 
-
-
       {/* ── About ── */}
       <Box sx={{ backgroundColor: "#fff", py: { xs: 6, md: 8 }, px: { xs: 3, md: 8 } }}>
         <Container maxWidth="lg">
@@ -554,19 +547,19 @@ const Landing = ({ onGoToLogin }) => {
                 <Typography sx={{ fontSize: 11, fontWeight: 600, color: "#0E7C3A" }}>🏥 About This System</Typography>
               </Box>
               <Typography sx={{ fontSize: { xs: 20, md: 26 }, fontWeight: 800, color: "#0F172A", mb: 2, lineHeight: 1.3 }}>
-                Community Health Forecasting for General Trias
+                Health Trends Forecasting for General Trias
               </Typography>
               <Typography sx={{ fontSize: 13.5, color: "#4B5563", lineHeight: 1.85, mb: 2 }}>
                 PredictHealth is an ML-based health forecasting system developed for the{" "}
                 <strong>City of General Trias, Cavite</strong>.
-                It uses LSTM neural networks trained on historical morbidity data compiled by the{" "}
-                <strong>City Health Office (CHO) General Trias</strong>.
+                It uses LSTM neural networks trained on morbidity data records compiled by the{" "}
+                <strong>City Health Office (CHO) Pinagtipunan</strong>.
               </Typography>
               <Typography sx={{ fontSize: 13.5, color: "#4B5563", lineHeight: 1.85, mb: 3 }}>
                 The system helps the public understand disease trends and supports health personnel in planning community health interventions across all barangays.
               </Typography>
               <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
-                {["Data sourced from CHO General Trias morbidity records","Covers all 33 barangays of General Trias City","Supports community health awareness and planning"].map((item, i) => (
+                {["Data sourced from CHO morbidity records","Covers all 33 barangays of General Trias City","Supports community health awareness and planning"].map((item, i) => (
                   <Box key={i} sx={{ display: "flex", alignItems: "flex-start", gap: 1.25 }}>
                     <Box sx={{ width: 18, height: 18, borderRadius: "50%", flexShrink: 0, mt: "1px",
                       backgroundColor: "rgba(27,79,138,0.1)", display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -601,7 +594,7 @@ const Landing = ({ onGoToLogin }) => {
       <Container maxWidth="lg" sx={{ pt: { xs: 6, md: 8 }, pb: { xs: 3, md: 4 } }}>
         <Box sx={{ textAlign: "center", mb: 5 }}>
           <Typography sx={{ fontSize: { xs: 22, md: 28 }, fontWeight: 800, color: "#111827", mb: 1, letterSpacing: "-0.5px" }}>
-            Public Health Insights at Your Fingertips
+            Accessible and Reliable Health Information
           </Typography>
           <Typography sx={{ fontSize: 14, color: "#6B7280" }}>Explore disease forecasts and trends for General Trias City.</Typography>
         </Box>
@@ -642,9 +635,24 @@ const Landing = ({ onGoToLogin }) => {
           © PredictHealth · Health Forecasting System
         </Typography>
         <Typography sx={{ fontSize: 11, color: "rgba(255,255,255,0.12)" }}>
-          Data source: City Health Office Pinagtipunan
+          Data source: City Health Office Pinagtipunan ·{" "}
+          <Box
+            component="span"
+            onClick={onGoToLogin}
+            sx={{
+              cursor: "pointer",
+              textDecoration: "underline",
+              textDecorationColor: "rgba(255,255,255,0.15)",
+              color: "rgba(255,255,255,0.18)",
+              "&:hover": { color: "rgba(255,255,255,0.35)" },
+              transition: "color 0.2s",
+            }}
+          >
+            For authorized personnel only
+          </Box>
         </Typography>
       </Box>
+
     </Box>
   );
 };
