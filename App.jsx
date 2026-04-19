@@ -1,6 +1,15 @@
 import React, { useState, useEffect } from "react";
 import { ThemeProvider, createTheme } from "@mui/material/styles";
 import CssBaseline from "@mui/material/CssBaseline";
+import {
+  Dialog,
+  DialogContent,
+  IconButton,
+  Box,
+} from "@mui/material";
+import { Close as CloseIcon } from "@mui/icons-material";
+
+import Landing from "./Landing";
 import Login from "./Login";
 import Dashboard from "./Dashboard";
 import History from "./History";
@@ -43,24 +52,31 @@ function App() {
   const resetToken = getResetTokenFromUrl();
 
   const [isAuthenticated, setIsAuthenticated] = useState(() => {
-    const token = localStorage.getItem("token");
-    return !!token;
+    return !!localStorage.getItem("token");
   });
 
+  // ── Determine initial page ────────────────────────────────────────────────
   const [currentPage, setCurrentPage] = useState(() => {
+    // Special URL routes first
     if (window.location.pathname === "/reset-password" && resetToken) {
       return "forgot";
     }
     if (window.location.pathname === "/verify-email") {
       return "verify-email";
     }
-    if (!isAuthenticated) {
-      localStorage.removeItem("currentPage");
-      return "browse";
+    // If authenticated, restore last page
+    if (!!localStorage.getItem("token")) {
+      return localStorage.getItem("currentPage") || "dashboard";
     }
-    return localStorage.getItem("currentPage") || "dashboard";
+    // Not authenticated → landing page
+    return "landing";
   });
 
+  // ── Login modal state (shown over landing or browse) ──────────────────────
+  const [loginModalOpen, setLoginModalOpen] = useState(false);
+  const [forgotInModal,  setForgotInModal]  = useState(false);
+
+  // ── Validate existing token on mount ─────────────────────────────────────
   useEffect(() => {
     if (isAuthenticated) {
       getCurrentUser()
@@ -70,19 +86,13 @@ function App() {
             err.message?.includes("Session expired") ||
             err.message?.includes("Not logged in");
           if (isAuthError) {
-            setIsAuthenticated(false);
-            setCurrentPage("login");
-            localStorage.removeItem("currentPage");
-            localStorage.removeItem("token");
-            localStorage.removeItem("username");
-            localStorage.removeItem("role");
-            localStorage.removeItem("fullName");
-            localStorage.removeItem("email");
+            handleLogout();
           }
         });
     }
   }, [isAuthenticated]);
 
+  // ── Uploaded data state ───────────────────────────────────────────────────
   const [uploadedFile, setUploadedFile] = useState(null);
   const [uploadedData, setUploadedData] = useState(() => {
     try {
@@ -93,6 +103,7 @@ function App() {
     }
   });
 
+  // ── Navigation helpers ────────────────────────────────────────────────────
   const handleNavigate = (page) => {
     localStorage.setItem("currentPage", page);
     setCurrentPage(page);
@@ -114,7 +125,7 @@ function App() {
     setUploadedFile(null);
     setUploadedData(null);
     setIsAuthenticated(false);
-    setCurrentPage("login");
+    setCurrentPage("landing");
   };
 
   const handleDataUploaded = (data) => {
@@ -127,6 +138,39 @@ function App() {
     });
   };
 
+  // ── Login modal handlers ──────────────────────────────────────────────────
+  const openLoginModal = () => {
+    setForgotInModal(false);
+    setLoginModalOpen(true);
+  };
+
+  const closeLoginModal = () => {
+    setLoginModalOpen(false);
+    setForgotInModal(false);
+  };
+
+  const handleLoginSuccess = () => {
+    setIsAuthenticated(true);
+    setLoginModalOpen(false);
+    setForgotInModal(false);
+    handleNavigate("dashboard");
+  };
+
+  // ── Public navigation (browse mode) ──────────────────────────────────────
+  const handlePublicNavigate = (page) => {
+    if (page === "login") {
+      openLoginModal();
+    } else if (page === "dashboard") {
+      setCurrentPage("browse");
+    } else if (page === "prediction") {
+      setCurrentPage("browse-prediction");
+    } else {
+      // history, dataimport → require login
+      openLoginModal();
+    }
+  };
+
+  // ── Shared props for authenticated pages ──────────────────────────────────
   const sharedProps = {
     onNavigate:   handleNavigate,
     onLogout:     handleLogout,
@@ -134,32 +178,78 @@ function App() {
     uploadedData: uploadedData,
   };
 
-  // ── Public navigation handler ─────────────────────────────────────────────
-  const handlePublicNavigate = (page) => {
-    if (page === "login") {
-      setCurrentPage("login");
-    } else if (page === "dashboard") {
-      setCurrentPage("browse");
-    } else if (page === "prediction") {
-      setCurrentPage("browse-prediction");
-    }
-    // history, dataimport, etc. → redirect to login for public users
-    else {
-      setCurrentPage("login");
-    }
-  };
+  const isPublicPage =
+    currentPage === "browse" || currentPage === "browse-prediction";
 
-  const isPublicPage = currentPage === "browse" || currentPage === "browse-prediction";
+  // ── Login modal (reusable, floats over any page) ──────────────────────────
+  const LoginModal = () => (
+    <Dialog
+      open={loginModalOpen}
+      onClose={closeLoginModal}
+      maxWidth="md"
+      fullWidth
+      PaperProps={{
+        sx: {
+          borderRadius: "16px",
+          overflow: "hidden",
+          boxShadow: "0 24px 64px rgba(0,0,0,0.25)",
+          maxWidth: 820,
+        },
+      }}
+    >
+      {/* Close button */}
+      <Box sx={{ position: "absolute", top: 12, right: 12, zIndex: 10 }}>
+        <IconButton
+          onClick={closeLoginModal}
+          size="small"
+          sx={{
+            backgroundColor: "rgba(255,255,255,0.15)",
+            color: "#fff",
+            "&:hover": { backgroundColor: "rgba(255,255,255,0.25)" },
+          }}
+        >
+          <CloseIcon sx={{ fontSize: 18 }} />
+        </IconButton>
+      </Box>
+
+      <DialogContent sx={{ p: 0 }}>
+        {forgotInModal ? (
+          <ForgotPassword
+            token={null}
+            onBack={() => setForgotInModal(false)}
+          />
+        ) : (
+          <Login
+            onLogin={handleLoginSuccess}
+            onGoToRegister={null}
+            onForgotPassword={() => setForgotInModal(true)}
+          />
+        )}
+      </DialogContent>
+    </Dialog>
+  );
 
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
+
+      {/* ── Login modal (floats over any page) ── */}
+      <LoginModal />
+
       <div>
-        {/* ── PUBLIC PAGES (no login required) ── */}
+        {/* ── LANDING PAGE (default for unauthenticated) ── */}
+        {currentPage === "landing" && (
+          <Landing
+            onGoToLogin={openLoginModal}
+            onBrowse={() => setCurrentPage("browse")}
+          />
+        )}
+
+        {/* ── PUBLIC / BROWSE PAGES ── */}
         {currentPage === "browse" && (
           <Dashboard
             onNavigate={handlePublicNavigate}
-            onLogout={() => setCurrentPage("login")}
+            onLogout={openLoginModal}
             isPublic={true}
           />
         )}
@@ -167,28 +257,18 @@ function App() {
         {currentPage === "browse-prediction" && (
           <Prediction
             onNavigate={handlePublicNavigate}
-            onLogout={() => setCurrentPage("login")}
+            onLogout={openLoginModal}
             isPublic={true}
           />
         )}
 
-        {/* ── AUTH PAGES ── */}
-        {currentPage === "login" && (
-          <Login
-            onLogin={() => {
-              setIsAuthenticated(true);
-              handleNavigate("dashboard");
-            }}
-            onGoToRegister={null}
-            onForgotPassword={() => setCurrentPage("forgot")}
-          />
-        )}
-
+        {/* ── AUTH PAGES (standalone, not in modal) ── */}
         {currentPage === "verify-email" && (
           <VerifyEmail
             onGoToLogin={() => {
               window.history.replaceState({}, "", "/");
-              setCurrentPage("login");
+              openLoginModal();
+              setCurrentPage("landing");
             }}
           />
         )}
@@ -200,14 +280,14 @@ function App() {
               if (resetToken) {
                 window.history.replaceState({}, "", "/");
               }
-              setCurrentPage("login");
+              setCurrentPage("landing");
             }}
           />
         )}
 
         {/* ── AUTHENTICATED PAGES ── */}
-        {currentPage === "dashboard" && <Dashboard {...sharedProps} />}
-        {currentPage === "history"   && <History   {...sharedProps} />}
+        {currentPage === "dashboard"  && <Dashboard  {...sharedProps} />}
+        {currentPage === "history"    && <History    {...sharedProps} />}
         {currentPage === "dataimport" && (
           <DataImport {...sharedProps} onDataUploaded={handleDataUploaded} />
         )}
