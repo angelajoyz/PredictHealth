@@ -97,178 +97,144 @@ const Login = ({ onLogin, onGoToRegister, onForgotPassword }) => {
   };
 
   return (
-    <Box
-      sx={{
-        minHeight: "100vh",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        backgroundColor: T.bg,
-      }}
-    >
-      {/* Card */}
-      <Box
-        sx={{
-          width: 360,
-          backgroundColor: "#fff",
-          borderRadius: "16px",
-          border: `1px solid ${T.border}`,
-          px: "32px",
-          py: "28px",
-          boxShadow: "0 2px 16px rgba(0,0,0,0.07)",
-        }}
-      >
-        {/* Logo */}
-        <Box sx={{ display: "flex", alignItems: "center", gap: 1.25, mb: 2.5 }}>
-          <Box
-            sx={{
-              width: 36,
-              height: 36,
-              borderRadius: "10px",
-              backgroundColor: T.blue,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              boxShadow: "0 3px 10px rgba(27,79,138,0.28)",
-              flexShrink: 0,
-            }}
-          >
-            <HealthAndSafetyIcon sx={{ fontSize: 20, color: "#fff" }} />
-          </Box>
-          <Box>
-            <Typography sx={{ fontSize: 14, fontWeight: 800, color: T.t1, lineHeight: 1.2 }}>
-              PredictHealth
-            </Typography>
-            <Typography sx={{ fontSize: 9, color: T.t4, textTransform: "uppercase", letterSpacing: "0.9px" }}>
-              Barangay Health Forecasting
-            </Typography>
-          </Box>
-        </Box>
-
-        {/* Heading */}
-        <Box sx={{ mb: 2.5 }}>
-          <Typography sx={{ fontSize: 18, fontWeight: 800, color: T.t1, letterSpacing: "-0.3px", mb: 0.4 }}>
-            Welcome Back
-          </Typography>
-          <Typography sx={{ fontSize: 12, color: T.t3 }}>
-            Sign in to access the PredictHealth dashboard.
-          </Typography>
-        </Box>
-
-        {error && (
-          <Alert severity="error" sx={{ mb: 2, borderRadius: "9px", fontSize: 12, py: 0.5 }}>
-            {error}
-          </Alert>
-        )}
-
-        {/* Username */}
-        <Box sx={{ mb: 1.75 }}>
-          <Typography sx={{ fontSize: 11.5, fontWeight: 600, color: T.t2, mb: 0.6 }}>
-            Username
-          </Typography>
-          <TextField
-            fullWidth
-            placeholder="Enter your username"
-            variant="outlined"
-            value={username}
-            onChange={(e) => { setUsername(e.target.value); setError(""); }}
-            onKeyPress={handleKeyPress}
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <PersonIcon sx={{ fontSize: 15, color: T.t4 }} />
-                </InputAdornment>
-              ),
-            }}
-            sx={fieldSx}
-          />
-        </Box>
-
-        {/* Password */}
-        <Box sx={{ mb: 0.5 }}>
-          <Typography sx={{ fontSize: 11.5, fontWeight: 600, color: T.t2, mb: 0.6 }}>
-            Password
-          </Typography>
-          <TextField
-            fullWidth
-            placeholder="Enter your password"
-            type={showPassword ? "text" : "password"}
-            variant="outlined"
-            value={password}
-            onChange={(e) => { setPassword(e.target.value); setError(""); }}
-            onKeyPress={handleKeyPress}
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <LockIcon sx={{ fontSize: 15, color: T.t4 }} />
-                </InputAdornment>
-              ),
-              endAdornment: (
-                <InputAdornment position="end">
-                  <IconButton
-                    onClick={() => setShowPassword((v) => !v)}
-                    edge="end"
-                    size="small"
-                    tabIndex={-1}
-                    sx={{ color: T.t4, "&:hover": { backgroundColor: "transparent", color: T.t3 } }}
-                    disableRipple
-                  >
-                    {showPassword
-                      ? <VisibilityOffIcon sx={{ fontSize: 15 }} />
-                      : <VisibilityIcon sx={{ fontSize: 15 }} />}
-                  </IconButton>
-                </InputAdornment>
-              ),
-            }}
-            sx={fieldSx}
-          />
-        </Box>
-
-        {/* Forgot password */}
-        <Box sx={{ display: "flex", justifyContent: "flex-end", mb: 2 }}>
-          <Typography
-            onClick={onForgotPassword}
-            sx={{
-              fontSize: 11.5, color: T.blue, fontWeight: 600, cursor: "pointer",
-              "&:hover": { textDecoration: "underline" },
-            }}
-          >
-            Forgot password?
-          </Typography>
-        </Box>
-
-        {/* Sign In button */}
-        <Button
-          fullWidth
-          variant="contained"
-          onClick={handleLogin}
-          disabled={loading}
-          endIcon={!loading && <ArrowForwardIcon sx={{ fontSize: 15 }} />}
+    <Box sx={{ px: "36px", py: "32px", backgroundColor: "#fff" }}>
+      {/* Logo */}
+      <Box sx={{ display: "flex", alignItems: "center", gap: 1.25, mb: 2.5 }}>
+        <Box
           sx={{
-            py: 1.1,
-            backgroundColor: T.blue,
-            fontSize: 13,
-            fontWeight: 700,
-            textTransform: "none",
-            borderRadius: "9px",
-            boxShadow: "0 2px 12px rgba(27,79,138,0.28)",
-            "&:hover": {
-              backgroundColor: T.blueMid,
-              boxShadow: "0 4px 18px rgba(27,79,138,0.36)",
-              transform: "translateY(-1px)",
-            },
-            "&:active": { transform: "translateY(0px)" },
-            "&:disabled": { backgroundColor: T.blue, opacity: 0.65 },
-            transition: "all 0.18s ease",
+            width: 36, height: 36, borderRadius: "10px",
+            backgroundColor: T.blue, display: "flex",
+            alignItems: "center", justifyContent: "center",
+            boxShadow: "0 3px 10px rgba(27,79,138,0.28)", flexShrink: 0,
           }}
         >
-          {loading ? "Signing in…" : "Sign In"}
-        </Button>
+          <HealthAndSafetyIcon sx={{ fontSize: 20, color: "#fff" }} />
+        </Box>
+        <Box>
+          <Typography sx={{ fontSize: 14, fontWeight: 800, color: T.t1, lineHeight: 1.2 }}>
+            PredictHealth
+          </Typography>
+          <Typography sx={{ fontSize: 9, color: T.t4, textTransform: "uppercase", letterSpacing: "0.9px" }}>
+            Barangay Health Forecasting
+          </Typography>
+        </Box>
+      </Box>
 
-        <Typography sx={{ fontSize: 11, color: T.t4, textAlign: "center", mt: 1.25 }}>
-          Authorized barangay health personnel only.
+      {/* Heading */}
+      <Box sx={{ mb: 2.5 }}>
+        <Typography sx={{ fontSize: 18, fontWeight: 800, color: T.t1, letterSpacing: "-0.3px", mb: 0.4 }}>
+          Welcome Back
+        </Typography>
+        <Typography sx={{ fontSize: 12, color: T.t3 }}>
+          Sign in to access the PredictHealth dashboard.
         </Typography>
       </Box>
+
+      {error && (
+        <Alert severity="error" sx={{ mb: 2, borderRadius: "9px", fontSize: 12, py: 0.5 }}>
+          {error}
+        </Alert>
+      )}
+
+      {/* Username */}
+      <Box sx={{ mb: 1.75 }}>
+        <Typography sx={{ fontSize: 11.5, fontWeight: 600, color: T.t2, mb: 0.6 }}>
+          Username
+        </Typography>
+        <TextField
+          fullWidth
+          placeholder="Enter your username"
+          variant="outlined"
+          value={username}
+          onChange={(e) => { setUsername(e.target.value); setError(""); }}
+          onKeyPress={handleKeyPress}
+          InputProps={{
+            startAdornment: (
+              <InputAdornment position="start">
+                <PersonIcon sx={{ fontSize: 15, color: T.t4 }} />
+              </InputAdornment>
+            ),
+          }}
+          sx={fieldSx}
+        />
+      </Box>
+
+      {/* Password */}
+      <Box sx={{ mb: 0.5 }}>
+        <Typography sx={{ fontSize: 11.5, fontWeight: 600, color: T.t2, mb: 0.6 }}>
+          Password
+        </Typography>
+        <TextField
+          fullWidth
+          placeholder="Enter your password"
+          type={showPassword ? "text" : "password"}
+          variant="outlined"
+          value={password}
+          onChange={(e) => { setPassword(e.target.value); setError(""); }}
+          onKeyPress={handleKeyPress}
+          InputProps={{
+            startAdornment: (
+              <InputAdornment position="start">
+                <LockIcon sx={{ fontSize: 15, color: T.t4 }} />
+              </InputAdornment>
+            ),
+            endAdornment: (
+              <InputAdornment position="end">
+                <IconButton
+                  onClick={() => setShowPassword((v) => !v)}
+                  edge="end" size="small" tabIndex={-1}
+                  sx={{ color: T.t4, "&:hover": { backgroundColor: "transparent", color: T.t3 } }}
+                  disableRipple
+                >
+                  {showPassword
+                    ? <VisibilityOffIcon sx={{ fontSize: 15 }} />
+                    : <VisibilityIcon sx={{ fontSize: 15 }} />}
+                </IconButton>
+              </InputAdornment>
+            ),
+          }}
+          sx={fieldSx}
+        />
+      </Box>
+
+      {/* Forgot password */}
+      <Box sx={{ display: "flex", justifyContent: "flex-end", mb: 2 }}>
+        <Typography
+          onClick={onForgotPassword}
+          sx={{
+            fontSize: 11.5, color: T.blue, fontWeight: 600, cursor: "pointer",
+            "&:hover": { textDecoration: "underline" },
+          }}
+        >
+          Forgot password?
+        </Typography>
+      </Box>
+
+      {/* Sign In button */}
+      <Button
+        fullWidth variant="contained"
+        onClick={handleLogin} disabled={loading}
+        endIcon={!loading && <ArrowForwardIcon sx={{ fontSize: 15 }} />}
+        sx={{
+          py: 1.1, backgroundColor: T.blue, fontSize: 13, fontWeight: 700,
+          textTransform: "none", borderRadius: "9px",
+          boxShadow: "0 2px 12px rgba(27,79,138,0.28)",
+          "&:hover": {
+            backgroundColor: T.blueMid,
+            boxShadow: "0 4px 18px rgba(27,79,138,0.36)",
+            transform: "translateY(-1px)",
+          },
+          "&:active": { transform: "translateY(0px)" },
+          "&:disabled": { backgroundColor: T.blue, opacity: 0.65 },
+          transition: "all 0.18s ease",
+        }}
+      >
+        {loading ? "Signing in…" : "Sign In"}
+      </Button>
+
+      <Typography sx={{ fontSize: 11, color: T.t4, textAlign: "center", mt: 1.25 }}>
+        Authorized barangay health personnel only.
+      </Typography>
     </Box>
   );
 };

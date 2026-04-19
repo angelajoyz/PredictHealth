@@ -55,29 +55,19 @@ function App() {
     return !!localStorage.getItem("token");
   });
 
-  // ── Determine initial page ────────────────────────────────────────────────
-const [currentPage, setCurrentPage] = useState(() => {
-  // Special URL routes first
-  if (window.location.pathname === "/reset-password" && resetToken) {
-    return "forgot";
-  }
-  if (window.location.pathname === "/verify-email") {
-    return "verify-email";
-  }
-  // If authenticated, restore last page
-  if (!!localStorage.getItem("token")) {
-    return localStorage.getItem("currentPage") || "dashboard";
-  }
-  // ⬇️ NOT authenticated → ALWAYS landing, ignore localStorage
-  localStorage.removeItem("currentPage"); // clear any stale value
-  return "landing";
-});
+  const [currentPage, setCurrentPage] = useState(() => {
+    if (window.location.pathname === "/reset-password" && resetToken) return "forgot";
+    if (window.location.pathname === "/verify-email") return "verify-email";
+    if (!!localStorage.getItem("token")) {
+      return localStorage.getItem("currentPage") || "dashboard";
+    }
+    localStorage.removeItem("currentPage");
+    return "landing";
+  });
 
-  // ── Login modal state (shown over landing or browse) ──────────────────────
   const [loginModalOpen, setLoginModalOpen] = useState(false);
   const [forgotInModal,  setForgotInModal]  = useState(false);
 
-  // ── Validate existing token on mount ─────────────────────────────────────
   useEffect(() => {
     if (isAuthenticated) {
       getCurrentUser()
@@ -86,25 +76,19 @@ const [currentPage, setCurrentPage] = useState(() => {
           const isAuthError =
             err.message?.includes("Session expired") ||
             err.message?.includes("Not logged in");
-          if (isAuthError) {
-            handleLogout();
-          }
+          if (isAuthError) handleLogout();
         });
     }
   }, [isAuthenticated]);
 
-  // ── Uploaded data state ───────────────────────────────────────────────────
   const [uploadedFile, setUploadedFile] = useState(null);
   const [uploadedData, setUploadedData] = useState(() => {
     try {
       const saved = localStorage.getItem("uploadedData");
       return saved ? JSON.parse(saved) : null;
-    } catch {
-      return null;
-    }
+    } catch { return null; }
   });
 
-  // ── Navigation helpers ────────────────────────────────────────────────────
   const handleNavigate = (page) => {
     localStorage.setItem("currentPage", page);
     setCurrentPage(page);
@@ -139,7 +123,6 @@ const [currentPage, setCurrentPage] = useState(() => {
     });
   };
 
-  // ── Login modal handlers ──────────────────────────────────────────────────
   const openLoginModal = () => {
     setForgotInModal(false);
     setLoginModalOpen(true);
@@ -157,7 +140,6 @@ const [currentPage, setCurrentPage] = useState(() => {
     handleNavigate("dashboard");
   };
 
-  // ── Public navigation (browse mode) ──────────────────────────────────────
   const handlePublicNavigate = (page) => {
     if (page === "login") {
       openLoginModal();
@@ -166,12 +148,10 @@ const [currentPage, setCurrentPage] = useState(() => {
     } else if (page === "prediction") {
       setCurrentPage("browse-prediction");
     } else {
-      // history, dataimport → require login
       openLoginModal();
     }
   };
 
-  // ── Shared props for authenticated pages ──────────────────────────────────
   const sharedProps = {
     onNavigate:   handleNavigate,
     onLogout:     handleLogout,
@@ -179,37 +159,34 @@ const [currentPage, setCurrentPage] = useState(() => {
     uploadedData: uploadedData,
   };
 
-  const isPublicPage =
-    currentPage === "browse" || currentPage === "browse-prediction";
-
-  // ── Login modal (reusable, floats over any page) ──────────────────────────
+  // ── Login modal ────────────────────────────────────────────────────────────
   const LoginModal = () => (
     <Dialog
       open={loginModalOpen}
       onClose={closeLoginModal}
-      maxWidth="md"
-      fullWidth
+      maxWidth={false}
       PaperProps={{
         sx: {
           borderRadius: "16px",
           overflow: "hidden",
-          boxShadow: "0 24px 64px rgba(0,0,0,0.25)",
-          maxWidth: 820,
+          boxShadow: "0 24px 64px rgba(0,0,0,0.2)",
+          width: 400,
+          m: 2,
         },
       }}
     >
       {/* Close button */}
-      <Box sx={{ position: "absolute", top: 12, right: 12, zIndex: 10 }}>
+      <Box sx={{ position: "absolute", top: 10, right: 10, zIndex: 10 }}>
         <IconButton
           onClick={closeLoginModal}
           size="small"
           sx={{
-            backgroundColor: "rgba(255,255,255,0.15)",
-            color: "#fff",
-            "&:hover": { backgroundColor: "rgba(255,255,255,0.25)" },
+            backgroundColor: "rgba(0,0,0,0.06)",
+            color: "#64748B",
+            "&:hover": { backgroundColor: "rgba(0,0,0,0.12)" },
           }}
         >
-          <CloseIcon sx={{ fontSize: 18 }} />
+          <CloseIcon sx={{ fontSize: 16 }} />
         </IconButton>
       </Box>
 
@@ -234,11 +211,9 @@ const [currentPage, setCurrentPage] = useState(() => {
     <ThemeProvider theme={theme}>
       <CssBaseline />
 
-      {/* ── Login modal (floats over any page) ── */}
       <LoginModal />
 
       <div>
-        {/* ── LANDING PAGE (default for unauthenticated) ── */}
         {currentPage === "landing" && (
           <Landing
             onGoToLogin={openLoginModal}
@@ -246,7 +221,6 @@ const [currentPage, setCurrentPage] = useState(() => {
           />
         )}
 
-        {/* ── PUBLIC / BROWSE PAGES ── */}
         {currentPage === "browse" && (
           <Dashboard
             onNavigate={handlePublicNavigate}
@@ -263,7 +237,6 @@ const [currentPage, setCurrentPage] = useState(() => {
           />
         )}
 
-        {/* ── AUTH PAGES (standalone, not in modal) ── */}
         {currentPage === "verify-email" && (
           <VerifyEmail
             onGoToLogin={() => {
@@ -278,15 +251,12 @@ const [currentPage, setCurrentPage] = useState(() => {
           <ForgotPassword
             token={resetToken}
             onBack={() => {
-              if (resetToken) {
-                window.history.replaceState({}, "", "/");
-              }
+              if (resetToken) window.history.replaceState({}, "", "/");
               setCurrentPage("landing");
             }}
           />
         )}
 
-        {/* ── AUTHENTICATED PAGES ── */}
         {currentPage === "dashboard"  && <Dashboard  {...sharedProps} />}
         {currentPage === "history"    && <History    {...sharedProps} />}
         {currentPage === "dataimport" && (

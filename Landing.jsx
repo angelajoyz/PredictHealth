@@ -544,22 +544,7 @@ const Landing = ({ onGoToLogin }) => {
         </Typography>
       </Box>
 
-      {/* ── Stats strip ── */}
-      <Box sx={{ backgroundColor: "#0F172A" }}>
-        <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2,1fr)", md: "repeat(4,1fr)" },
-          borderTop: "1px solid rgba(255,255,255,0.06)", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
-          {stats.map((s, i) => (
-            <Box key={i} sx={{ py: 3.5, px: 3, textAlign: "center",
-              borderRight: { md: i < 3 ? "1px solid rgba(255,255,255,0.06)" : "none" } }}>
-              <Typography sx={{ fontSize: { xs: 28, md: 34 }, fontWeight: 800, color: "#fff", lineHeight: 1, mb: 0.5 }}>
-                <Counter target={s.value} suffix={s.suffix} />
-              </Typography>
-              <Typography sx={{ fontSize: 12.5, fontWeight: 600, color: "rgba(255,255,255,0.6)", mb: 0.3 }}>{s.label}</Typography>
-              <Typography sx={{ fontSize: 10.5, color: "rgba(255,255,255,0.28)" }}>{s.sub}</Typography>
-            </Box>
-          ))}
-        </Box>
-      </Box>
+
 
       {/* ── About ── */}
       <Box sx={{ backgroundColor: "#fff", py: { xs: 6, md: 8 }, px: { xs: 3, md: 8 } }}>
