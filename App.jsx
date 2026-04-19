@@ -56,21 +56,22 @@ function App() {
   });
 
   // ── Determine initial page ────────────────────────────────────────────────
-  const [currentPage, setCurrentPage] = useState(() => {
-    // Special URL routes first
-    if (window.location.pathname === "/reset-password" && resetToken) {
-      return "forgot";
-    }
-    if (window.location.pathname === "/verify-email") {
-      return "verify-email";
-    }
-    // If authenticated, restore last page
-    if (!!localStorage.getItem("token")) {
-      return localStorage.getItem("currentPage") || "dashboard";
-    }
-    // Not authenticated → landing page
-    return "landing";
-  });
+const [currentPage, setCurrentPage] = useState(() => {
+  // Special URL routes first
+  if (window.location.pathname === "/reset-password" && resetToken) {
+    return "forgot";
+  }
+  if (window.location.pathname === "/verify-email") {
+    return "verify-email";
+  }
+  // If authenticated, restore last page
+  if (!!localStorage.getItem("token")) {
+    return localStorage.getItem("currentPage") || "dashboard";
+  }
+  // ⬇️ NOT authenticated → ALWAYS landing, ignore localStorage
+  localStorage.removeItem("currentPage"); // clear any stale value
+  return "landing";
+});
 
   // ── Login modal state (shown over landing or browse) ──────────────────────
   const [loginModalOpen, setLoginModalOpen] = useState(false);
