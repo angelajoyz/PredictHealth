@@ -10,10 +10,11 @@ import {
   Group as GroupIcon,
   BarChart as BarChartIcon,
   ArrowForward as ArrowForwardIcon,
-  Coronavirus as CoronavirusIcon,
-  MonitorHeart as MonitorHeartIcon,
   MedicalServices as MedicalServicesIcon,
+  Lock as LockIcon,
+  OpenInFull as OpenInFullIcon,
 } from "@mui/icons-material";
+import Dashboard from "./Dashboard";
 
 const T = {
   blue:      "#1B4F8A",
@@ -397,6 +398,143 @@ const Landing = ({ onGoToLogin, onBrowse }) => {
           ))}
         </Grid>
       </Container>
+
+      {/* ── Live Dashboard Preview ── */}
+      <Box sx={{ backgroundColor: "#F1F5F9", py: { xs: 6, md: 8 } }}>
+        <Container maxWidth="lg">
+          {/* Section header */}
+          <Box sx={{ textAlign: "center", mb: 4 }}>
+            <Box sx={{
+              display: "inline-flex", alignItems: "center", gap: 0.75,
+              px: 1.75, py: 0.6, borderRadius: "20px", mb: 2,
+              backgroundColor: "rgba(27,79,138,0.08)",
+              border: "1px solid rgba(27,79,138,0.2)",
+            }}>
+              <Box sx={{ width: 6, height: 6, borderRadius: "50%", backgroundColor: T.blue, flexShrink: 0 }} />
+              <Typography sx={{ fontSize: 11.5, fontWeight: 600, color: T.blue }}>
+                Live Public Data
+              </Typography>
+            </Box>
+            <Typography sx={{ fontSize: { xs: 22, md: 28 }, fontWeight: 800, color: "#0F172A", mb: 1, letterSpacing: "-0.5px" }}>
+              See the actual forecast data
+            </Typography>
+            <Typography sx={{ fontSize: 14, color: "#6B7280", maxWidth: 480, mx: "auto" }}>
+              Real-time CHO General Trias disease forecasts — publicly viewable below.
+              Sign in to unlock full barangay-level analysis and export tools.
+            </Typography>
+          </Box>
+
+          {/* Dashboard preview frame */}
+          <Box sx={{ position: "relative", borderRadius: "16px", overflow: "hidden",
+            border: "1px solid #E2E8F0", boxShadow: "0 8px 40px rgba(0,0,0,0.10)" }}>
+
+            {/* Browser chrome top bar */}
+            <Box sx={{
+              backgroundColor: "#1E293B", px: 2, py: 1.25,
+              display: "flex", alignItems: "center", gap: 1.5,
+              borderBottom: "1px solid rgba(255,255,255,0.06)",
+            }}>
+              <Box sx={{ display: "flex", gap: 0.6 }}>
+                {["#FF5F57","#FEBC2E","#28C840"].map((c, i) => (
+                  <Box key={i} sx={{ width: 10, height: 10, borderRadius: "50%", backgroundColor: c }} />
+                ))}
+              </Box>
+              <Box sx={{
+                flex: 1, mx: 2, py: 0.4, px: 1.5, borderRadius: "6px",
+                backgroundColor: "rgba(255,255,255,0.06)",
+                display: "flex", alignItems: "center", gap: 0.75,
+              }}>
+                <Box sx={{ width: 8, height: 8, borderRadius: "50%", backgroundColor: "#4ADE80", flexShrink: 0 }} />
+                <Typography sx={{ fontSize: 11, color: "rgba(255,255,255,0.4)", fontFamily: "monospace" }}>
+                  predicthealth.app/browse · CHO General Trias
+                </Typography>
+              </Box>
+              <Button
+                onClick={onBrowse}
+                size="small"
+                startIcon={<OpenInFullIcon sx={{ fontSize: 11 }} />}
+                sx={{
+                  textTransform: "none", fontSize: 11, fontWeight: 600, borderRadius: "6px",
+                  color: "rgba(255,255,255,0.6)", border: "1px solid rgba(255,255,255,0.15)",
+                  px: 1.25, py: 0.4, minWidth: "auto",
+                  "&:hover": { backgroundColor: "rgba(255,255,255,0.08)", color: "#fff" },
+                }}>
+                Open
+              </Button>
+            </Box>
+
+            {/* Clipped Dashboard — only top portion visible */}
+            <Box sx={{
+              height: { xs: 420, md: 540 },
+              overflow: "hidden",
+              position: "relative",
+              backgroundColor: "#F8FAFC",
+              // scale down slightly so it fits nicely
+              "& > *": {
+                transform: "scale(0.92)",
+                transformOrigin: "top left",
+                width: "109%",         // compensate for scale
+                height: "109%",
+                pointerEvents: "none", // prevent interaction inside preview
+              },
+            }}>
+              <Dashboard
+                onNavigate={() => {}}
+                onLogout={() => {}}
+                isPublic={true}
+                _isEmbedded={true}
+              />
+            </Box>
+
+            {/* Fade + CTA overlay at bottom */}
+            <Box sx={{
+              position: "absolute", bottom: 0, left: 0, right: 0,
+              pt: 10, pb: 3, px: 3, textAlign: "center",
+              background: "linear-gradient(to bottom, transparent 0%, rgba(248,250,252,0.85) 35%, #F8FAFC 70%)",
+              display: "flex", flexDirection: "column", alignItems: "center", gap: 2,
+            }}>
+              <Box sx={{
+                display: "flex", flexDirection: "column", alignItems: "center", gap: 1.5,
+                p: "18px 28px", borderRadius: "14px",
+                backgroundColor: "rgba(255,255,255,0.92)",
+                border: "1px solid #E2E8F0",
+                boxShadow: "0 4px 24px rgba(0,0,0,0.08)",
+                backdropFilter: "blur(8px)",
+                maxWidth: 420,
+              }}>
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                  <LockIcon sx={{ fontSize: 15, color: T.blue }} />
+                  <Typography sx={{ fontSize: 13.5, fontWeight: 700, color: "#0F172A" }}>
+                    Full access requires sign in
+                  </Typography>
+                </Box>
+                <Typography sx={{ fontSize: 12.5, color: "#6B7280", textAlign: "center", lineHeight: 1.6 }}>
+                  View per-barangay forecasts, age & sex breakdowns, export reports, and more — available to authorized CHO & BHC staff.
+                </Typography>
+                <Box sx={{ display: "flex", gap: 1.5, mt: 0.5 }}>
+                  <Button onClick={onBrowse} variant="outlined" size="small"
+                    sx={{
+                      textTransform: "none", fontSize: 12.5, fontWeight: 600, borderRadius: "8px",
+                      borderColor: "#CBD5E1", color: "#374151", px: 2,
+                      "&:hover": { borderColor: T.blue, color: T.blue },
+                    }}>
+                    Browse Public Data
+                  </Button>
+                  <Button onClick={onGoToLogin} variant="contained" size="small"
+                    endIcon={<ArrowForwardIcon sx={{ fontSize: 13 }} />}
+                    sx={{
+                      textTransform: "none", fontSize: 12.5, fontWeight: 700, borderRadius: "8px",
+                      backgroundColor: T.blue, px: 2,
+                      "&:hover": { backgroundColor: T.blueMid },
+                    }}>
+                    Sign In
+                  </Button>
+                </Box>
+              </Box>
+            </Box>
+          </Box>
+        </Container>
+      </Box>
 
       {/* ── CTA ── */}
       <Box sx={{ backgroundColor: T.sidebarBg, py: { xs: 7, md: 9 }, textAlign: "center", px: 3 }}>
