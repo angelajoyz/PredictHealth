@@ -1,5 +1,5 @@
 import { forecastAll, getSavedForecast, getDiseaseBreakdown } from './services/api';
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Box, Typography, Card, CardContent, Button,
   Alert, Select, MenuItem as MenuItemComponent,
@@ -32,7 +32,6 @@ const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api"
 const ALL_BARANGAYS = '__ALL__';
 const MAX_BARANGAY_SELECTION = 5;
 
-// computeForecastParams defined FIRST so checkDatasetReadyForForecast can call it
 const computeForecastParams = () => {
   const now = new Date();
   const datasetEndRaw = localStorage.getItem('datasetEndDate') || '';
@@ -42,15 +41,12 @@ const computeForecastParams = () => {
   if (datasetEndRaw) {
     const parsed = new Date(datasetEndRaw);
     if (!Number.isNaN(parsed.getTime())) {
-      const endMonth = parsed.getMonth(); // 0-indexed
+      const endMonth = parsed.getMonth();
       const endYear  = parsed.getFullYear();
-
       if (endMonth === 11) {
-        // Data complete through December → forecast full next year
         forecastYear = endYear + 1;
         startMonth = 0;
       } else {
-        // Data incomplete → forecast same year, starting month after last data
         forecastYear = endYear;
         startMonth = endMonth + 1;
       }
@@ -64,20 +60,16 @@ const computeForecastParams = () => {
   return { forecastMonths: Math.max(months, 1), referenceDate: reference, forecastYear };
 };
 
-// ── FIX 1: checkDatasetReadyForForecast ──────────────────────────────────────
-// Only block generation if forecasting NEXT year but data doesn't reach December.
-// Same-year forecasts are ALWAYS allowed regardless of how far data goes.
 const checkDatasetReadyForForecast = () => {
   const datasetEndRaw = localStorage.getItem('datasetEndDate') || '';
   if (!datasetEndRaw) return { ready: false, reason: 'no_data' };
   const parsed = new Date(datasetEndRaw);
   if (Number.isNaN(parsed.getTime())) return { ready: false, reason: 'invalid_date' };
 
-  const endMonth = parsed.getMonth(); // 0-indexed (11 = December)
+  const endMonth = parsed.getMonth();
   const endYear  = parsed.getFullYear();
   const { forecastYear } = computeForecastParams();
 
-  // Only block when targeting NEXT year without complete current-year data
   if (forecastYear > endYear) {
     if (endMonth !== 11) {
       const endMonthLabel = parsed.toLocaleDateString('en-PH', { month: 'long' });
@@ -85,7 +77,6 @@ const checkDatasetReadyForForecast = () => {
     }
   }
 
-  // Same-year forecast OR data complete through December → always allowed
   return { ready: true, endYear, forecastYear };
 };
 
@@ -557,7 +548,8 @@ const Dashboard = ({ onNavigate, onLogout, isPublic = false }) => {
   const [availableForecastYears, setAvailableForecastYears] = useState([]);
   const [selectedForecastYear,   setSelectedForecastYear]   = useState(null);
 
-  const { forecastMonths, referenceDate, forecastYear } = computeForecastParams();
+  const [forecastParams, setForecastParams] = useState(() => computeForecastParams());
+  const { forecastMonths, referenceDate, forecastYear } = forecastParams;
   const forecastedBarangaysKey = `forecastedBarangays_${forecastYear}`;
 
   const [forecastedBarangays, setForecastedBarangays] = useState(() => {
@@ -574,6 +566,10 @@ const Dashboard = ({ onNavigate, onLogout, isPublic = false }) => {
   const pendingNavRef   = useRef(null);
   const isGeneratingRef = useRef(false);
 
+  // ── FIX: Track generation state in a ref so useEffect can read it without
+  // being added as a dependency (which would cause infinite loops).
+  const forecastLoadingRef = useRef(false);
+
   const cityLabel = localStorage.getItem('datasetCity') || '';
 
   const realNow           = new Date();
@@ -586,13 +582,13 @@ const Dashboard = ({ onNavigate, onLogout, isPublic = false }) => {
   const thisMonthDate     = referenceDate;
   const thisMonthKey      = `${thisMonthDate.getFullYear()}-${String(thisMonthDate.getMonth() + 1).padStart(2, '0')}`;
 
-  // ── FIX 5: isViewingHistoricalYear ───────────────────────────────────────────
-  // Only treat as historical if selectedForecastYear is strictly LESS than forecastYear.
-  // This prevents the "past forecast year" warning from showing when viewing the
-  // current target year (e.g. both are 2026).
   const isViewingHistoricalYear = selectedForecastYear !== null && selectedForecastYear < forecastYear;
 
-  useEffect(() => { isGeneratingRef.current = forecastLoading; }, [forecastLoading]);
+  // ── FIX: Keep both refs in sync with state ───────────────────────────────────
+  useEffect(() => {
+    isGeneratingRef.current = forecastLoading;
+    forecastLoadingRef.current = forecastLoading;
+  }, [forecastLoading]);
 
   useEffect(() => {
     const handleBeforeUnload = (e) => {
@@ -626,7 +622,6 @@ const Dashboard = ({ onNavigate, onLogout, isPublic = false }) => {
 
   // ── Initial data fetch ────────────────────────────────────────────────────────
   useEffect(() => {
-    // Read initial readiness from whatever is currently in localStorage
     setDatasetReadiness(checkDatasetReadyForForecast());
 
     try {
@@ -663,38 +658,41 @@ const Dashboard = ({ onNavigate, onLogout, isPublic = false }) => {
         if (data.disease_columns?.length > 0) { setAvailableDiseases(data.disease_columns); localStorage.setItem('diseaseColumns', JSON.stringify(data.disease_columns)); }
         if (data.city) localStorage.setItem('datasetCity', data.city);
 
-        // ── FIX 2 & 3: Always sync datasetEndDate from backend to clear stale values ──
-        // This prevents old localStorage values (e.g. Dec 2025) from making
-        // computeForecastParams return the wrong forecastYear.
         if (data.dataset_end_date) {
           localStorage.setItem('datasetEndDate', data.dataset_end_date);
         } else {
-          // No end date from backend → clear stale value so we don't block incorrectly
           localStorage.removeItem('datasetEndDate');
         }
-        // Always re-check readiness AFTER updating localStorage from backend
+
+        const freshParams = computeForecastParams();
+        setForecastParams(freshParams);
         setDatasetReadiness(checkDatasetReadyForForecast());
 
         if (data.available_forecast_years?.length > 0) {
           setAvailableForecastYears(data.available_forecast_years);
-          // ── FIX 4: Use the freshly-computed forecastYear (after localStorage update) ──
-          const { forecastYear: freshFY } = computeForecastParams();
-          const defaultYear = data.available_forecast_years.includes(freshFY)
-            ? freshFY
+          const defaultYear = data.available_forecast_years.includes(freshParams.forecastYear)
+            ? freshParams.forecastYear
             : data.available_forecast_years[0];
           setSelectedForecastYear(defaultYear);
         } else {
-          const { forecastYear: freshFY } = computeForecastParams();
-          setSelectedForecastYear(freshFY);
+          setSelectedForecastYear(freshParams.forecastYear);
         }
 
-        if (data.forecast_year !== null && data.forecast_year !== undefined) {
-          const backendFY = data.forecast_year;
-          const { forecastYear: currentFY } = computeForecastParams();
-          if (backendFY === currentFY) { setForecastedBarangays(data.forecasted_barangays || []); }
-          else { setForecastedBarangays([]); try { localStorage.removeItem(`forecastedBarangays_${backendFY}`); } catch {} }
-        } else {
-          setForecastedBarangays(data.forecasted_barangays || []);
+        {
+          const currentFY = freshParams.forecastYear;
+          const localKey  = `forecastedBarangays_${currentFY}`;
+          let fromBackend = [];
+          if (data.forecast_year === currentFY || data.forecast_year == null) {
+            fromBackend = data.forecasted_barangays || [];
+          }
+          let fromLocal = [];
+          try {
+            const raw = localStorage.getItem(localKey);
+            if (raw) fromLocal = JSON.parse(raw);
+          } catch {}
+          const merged = Array.from(new Set([...fromBackend, ...fromLocal]));
+          setForecastedBarangays(merged);
+          try { localStorage.setItem(localKey, JSON.stringify(merged)); } catch {}
         }
 
         try {
@@ -738,9 +736,21 @@ const Dashboard = ({ onNavigate, onLogout, isPublic = false }) => {
   useEffect(() => { if (selectedBarangay) localStorage.setItem('cachedForecastBarangay', selectedBarangay); }, [selectedBarangay]);
   useEffect(() => { localStorage.setItem('cachedForecastDisease', selectedDisease); }, [selectedDisease]);
 
+  // ── FIX: Guard this useEffect so it never fires while generation is in progress.
+  // The ref (forecastLoadingRef) is used instead of the state variable so we don't
+  // need to add forecastLoading as a dependency, which would cause extra fetches.
   useEffect(() => {
     if (selectedForecastYear === null) return;
     if (!isPublic && !hasDbData) return;
+
+    // ── KEY FIX: Never fetch forecast-saved while a generation is running.
+    // This prevents the 429 "another forecast is already running" error caused
+    // by this useEffect firing mid-generation when state changes trigger re-renders.
+    if (forecastLoadingRef.current) return;
+
+    const isHistorical = selectedForecastYear < forecastYear;
+    if (selectedForecastYear > forecastYear) return;
+
     const city = localStorage.getItem('datasetCity') || '';
     setFetchingForecast(true);
     setForecastError('');
@@ -750,7 +760,7 @@ const Dashboard = ({ onNavigate, onLogout, isPublic = false }) => {
 
     const url = isPublic
       ? `${API_BASE_URL}/public/forecast?barangay=${encodeURIComponent(selectedBarangay)}`
-      : `${API_BASE_URL}/forecast-saved?barangay=${encodeURIComponent(selectedBarangay)}&city=${encodeURIComponent(city)}${selectedForecastYear !== forecastYear ? `&forecast_year=${selectedForecastYear}` : ''}`;
+      : `${API_BASE_URL}/forecast-saved?barangay=${encodeURIComponent(selectedBarangay)}&city=${encodeURIComponent(city)}${isHistorical ? `&forecast_year=${selectedForecastYear}` : ''}`;
 
     const headers = (!isPublic && token) ? { 'Authorization': `Bearer ${token}` } : {};
 
@@ -767,7 +777,7 @@ const Dashboard = ({ onNavigate, onLogout, isPublic = false }) => {
       })
       .catch(() => { setForecastData(null); })
       .finally(() => setFetchingForecast(false));
-  }, [selectedBarangay, hasDbData, selectedForecastYear]);
+  }, [selectedBarangay, hasDbData, selectedForecastYear, forecastYear]);
 
   const computeInsights = (history) => {
     if (!history?.length) return;
@@ -878,42 +888,117 @@ const Dashboard = ({ onNavigate, onLogout, isPublic = false }) => {
     if (selectedBrgy.length > 0) runGenerate(selectedBrgy);
   };
 
+  // ── FIX: Retry helper for 429 responses ──────────────────────────────────────
+  const fetchWithRetry = async (url, options, retries = 3, delayMs = 4000) => {
+    for (let attempt = 0; attempt < retries; attempt++) {
+      const res = await fetch(url, options);
+      if (res.status !== 429) return res;
+      if (attempt < retries - 1) {
+        console.warn(`429 received — retrying in ${delayMs}ms (attempt ${attempt + 1}/${retries})`);
+        await new Promise(r => setTimeout(r, delayMs));
+      }
+    }
+    // Return the last 429 response so caller can handle it
+    return await fetch(url, options);
+  };
+
   const runGenerate = async (barangaysToGenerate) => {
     setForecastLoading(true);
+    forecastLoadingRef.current = true; // ── FIX: set ref immediately so useEffect guard works
     setForecastError('');
     const total = barangaysToGenerate.length;
     setGenOverlay({ visible: true, progress: 0, total, current: null, completed: [], failed: [] });
+
+    const completedList = [];
+    const failedList    = [];
+
     try {
       const city  = localStorage.getItem('datasetCity') || '';
       const token = localStorage.getItem('token');
-      const completedList = [];
-      const failedList    = [];
+
       for (let i = 0; i < barangaysToGenerate.length; i++) {
         const brgy = barangaysToGenerate[i];
+
+        // Update overlay — only current barangay and progress counter, NOT completed list yet
+        // to avoid triggering unnecessary re-renders that could fire the forecast-saved useEffect
         setGenOverlay(prev => ({ ...prev, current: brgy, progress: i }));
+
         try {
-          const res = await fetch(`${API_BASE_URL}/forecast-from-db`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ barangay: brgy, diseases: availableDiseases, forecast_months: forecastMonths, city }) });
+          // ── FIX: Use fetchWithRetry instead of plain fetch to handle 429 gracefully
+          const res = await fetchWithRetry(
+            `${API_BASE_URL}/forecast-from-db`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+              body: JSON.stringify({ barangay: brgy, diseases: availableDiseases, forecast_months: forecastMonths, city }),
+            }
+          );
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
           completedList.push(brgy);
-        } catch (e) { console.error(`Forecast failed for ${brgy}:`, e); failedList.push(brgy); }
-        setGenOverlay(prev => ({ ...prev, progress: i + 1, completed: [...completedList], failed: [...failedList] }));
+        } catch (e) {
+          console.error(`Forecast failed for ${brgy}:`, e);
+          failedList.push(brgy);
+        }
+
+        // Update progress after each barangay completes
+        setGenOverlay(prev => ({
+          ...prev,
+          progress: i + 1,
+          completed: [...completedList],
+          failed: [...failedList],
+        }));
       }
+
+      // ── All barangays done — now safe to update state that triggers useEffect fetches
       setHasSavedForecasts(true);
       setHasNewUpload(false);
       localStorage.setItem('lastForecastGeneratedAt', new Date().toISOString());
       setGenerateAllProgress({ completed: completedList.length, total });
-      if (completedList.length > 0) setForecastedBarangays(prev => Array.from(new Set([...prev, ...completedList])));
-      setAvailableForecastYears(prev => Array.from(new Set([forecastYear, ...prev])).sort((a, b) => b - a));
-      setSelectedForecastYear(forecastYear);
-      const saved = await fetch(`${API_BASE_URL}/forecast-saved?barangay=${encodeURIComponent(selectedBarangay)}&city=${encodeURIComponent(localStorage.getItem('datasetCity') || '')}`, { headers: { 'Authorization': `Bearer ${token}` } }).then(r => r.json()).catch(() => null);
-      if (saved && !saved.not_found) { setForecastData(saved); setForecastIsValid(isForecastValid(saved.forecast_dates)); }
-      if (failedList.length > 0) setForecastError(`Done! ${completedList.length}/${total} barangays completed. ${failedList.length} failed.`);
+      if (completedList.length > 0) {
+        setForecastedBarangays(prev => Array.from(new Set([...prev, ...completedList])));
+      }
+
+      if (failedList.length > 0) {
+        setForecastError(`Done! ${completedList.length}/${total} barangays completed. ${failedList.length} failed.`);
+      }
+
     } catch (err) {
       setForecastError(err.message || 'Generate failed. Please try again.');
     } finally {
+      // ── FIX: Set forecastLoading to false BEFORE triggering state changes
+      // that would cause the forecast-saved useEffect to fire.
+      // Order matters: release the lock first, then update year selectors.
       setForecastLoading(false);
+      forecastLoadingRef.current = false;
+
       setGenOverlay(prev => ({ ...prev, current: null }));
-      setTimeout(() => { setGenOverlay(prev => ({ ...prev, visible: false })); setTimeout(() => setGenerateAllProgress(null), 4000); }, 1500);
+
+      // ── Now safe to update year state — forecastLoading is already false so
+      // the useEffect guard (forecastLoadingRef.current) will allow the fetch.
+      setAvailableForecastYears(prev => Array.from(new Set([forecastYear, ...prev])).sort((a, b) => b - a));
+      setSelectedForecastYear(forecastYear);
+
+      // Fetch the updated forecast for the currently selected barangay
+      if (completedList.length > 0) {
+        try {
+          const token = localStorage.getItem('token');
+          const saved = await fetch(
+            `${API_BASE_URL}/forecast-saved?barangay=${encodeURIComponent(selectedBarangay)}&city=${encodeURIComponent(localStorage.getItem('datasetCity') || '')}`,
+            { headers: { 'Authorization': `Bearer ${token}` } }
+          ).then(r => r.json()).catch(() => null);
+          if (saved && !saved.not_found) {
+            setForecastData(saved);
+            setForecastIsValid(isForecastValid(saved.forecast_dates));
+          }
+        } catch (e) {
+          console.error('Failed to fetch saved forecast after generation:', e);
+        }
+      }
+
+      setTimeout(() => {
+        setGenOverlay(prev => ({ ...prev, visible: false }));
+        setTimeout(() => setGenerateAllProgress(null), 4000);
+      }, 1500);
     }
   };
 
@@ -929,9 +1014,6 @@ const Dashboard = ({ onNavigate, onLogout, isPublic = false }) => {
     return `${thisMonthKey} – ${endOfYear}`;
   })();
 
-  // ── FIX 1 (cont): buttonDisabled ─────────────────────────────────────────────
-  // datasetNotReady is now only true when genuinely blocking (next-year, incomplete data).
-  // Same-year forecasts will have datasetReadiness.ready = true → button is enabled.
   const datasetNotReady = datasetReadiness && !datasetReadiness.ready;
   const buttonDisabled  = forecastLoading || !hasDbData || datasetNotReady;
   const buttonLabel     = forecastLoading ? 'Generating…' : 'Generate';
@@ -991,7 +1073,6 @@ const Dashboard = ({ onNavigate, onLogout, isPublic = false }) => {
             </Box>
           )}
 
-          {/* ── FIX: DatasetNotReadyBanner only shows when genuinely blocking next-year ── */}
           {!checkingData && hasDbData && datasetNotReady && !isPublic && (
             <DatasetNotReadyBanner
               endMonth={datasetReadiness.endMonth}

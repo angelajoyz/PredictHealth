@@ -49,6 +49,24 @@ db.init_app(app)
 jwt = JWTManager(app)
 mail = Mail(app)
 
+# ── Pre-warm TensorFlow on startup (eliminates cold-start delay per barangay) ──
+def _warm_up_tensorflow():
+    try:
+        import numpy as np
+        from models.lstm_model import LSTMForecaster
+        print("🔥 Warming up TensorFlow...")
+        dummy = LSTMForecaster(sequence_length=6, n_features=3, n_outputs=1)
+        dummy.build_model()
+        dummy_X = np.zeros((1, 6, 3))
+        dummy.model.predict(dummy_X, verbose=0)
+        del dummy
+        import gc; gc.collect()
+        print("✅ TensorFlow warmed up")
+    except Exception as e:
+        print(f"⚠️ TF warm-up failed: {e}")
+
+with app.app_context():
+    _warm_up_tensorflow()
 
 CORS(app, resources={
     r"/api/public/*": {
@@ -287,13 +305,22 @@ def _get_cache_paths(cache_key):
 
 
 def _clear_model_cache():
+    # Clear disk cache
     folder = app.config['MODEL_FOLDER']
     for fname in os.listdir(folder):
         try:
             os.remove(os.path.join(folder, fname))
         except Exception:
             pass
-    print("   🗑️  Model cache cleared")
+    # Also clear in-memory cache so stale models are not reused after new upload
+    _model_memory_cache.clear()
+    print("   🗑️  Model cache cleared (disk + memory)")
+
+
+# In-memory cache: cache_key → dict with forecaster + meta
+# Survives across requests within the same Render worker process.
+# Wiped automatically on new file upload via _clear_model_cache().
+_model_memory_cache = {}
 
 
 def run_lstm_for_barangay(barangay, city, target_diseases, forecast_months,
@@ -312,9 +339,35 @@ def run_lstm_for_barangay(barangay, city, target_diseases, forecast_months,
     cache_key = _make_cache_key(barangay, city, diseases)
     model_path, meta_path = _get_cache_paths(cache_key)
 
+    # ── 1. In-memory cache (fastest — no disk I/O, no model reload) ──────────
+    if cache_key in _model_memory_cache:
+        try:
+            print(f"   ⚡⚡ Memory cache hit for {barangay}")
+            cached = _model_memory_cache[cache_key]
+
+            processor = DataProcessor(sequence_length=app.config['SEQUENCE_LENGTH'])
+            processor.scalers = cached['scalers']
+
+            predictions_scaled   = cached['forecaster'].forecast(
+                cached['last_sequence'], n_months=forecast_months
+            )
+            predictions_original = processor.inverse_transform_predictions(
+                predictions_scaled, diseases
+            )
+
+            forecast_dates   = build_forecast_dates(cached['last_date'], forecast_months)
+            predictions_dict = {
+                d: clean_floats(predictions_original[d].tolist()) for d in diseases
+            }
+            return diseases, predictions_dict, cached['historical_dict'], forecast_dates
+        except Exception as e:
+            print(f"   ⚠️  Memory cache failed ({e}) — falling back to disk")
+            _model_memory_cache.pop(cache_key, None)
+
+    # ── 2. Disk cache (fast — no retraining, just reload weights) ────────────
     if os.path.exists(model_path) and os.path.exists(meta_path):
         try:
-            print(f"   ⚡ Cache hit — loading trained model for {barangay}")
+            print(f"   ⚡ Disk cache hit — loading trained model for {barangay}")
             with open(meta_path, 'rb') as f:
                 meta = pickle.load(f)
 
@@ -325,21 +378,36 @@ def run_lstm_for_barangay(barangay, city, target_diseases, forecast_months,
             )
             forecaster.load_model(model_path)
 
+            # Promote to memory cache so next request is instant
+            _model_memory_cache[cache_key] = {
+                'forecaster':      forecaster,
+                'scalers':         meta['scalers'],
+                'last_sequence':   meta['last_sequence'],
+                'last_date':       meta['last_date'],
+                'historical_dict': meta['historical_dict'],
+            }
+
             processor = DataProcessor(sequence_length=app.config['SEQUENCE_LENGTH'])
             processor.scalers = meta['scalers']
 
-            predictions_scaled   = forecaster.forecast(meta['last_sequence'], n_months=forecast_months)
-            predictions_original = processor.inverse_transform_predictions(predictions_scaled, diseases)
+            predictions_scaled   = forecaster.forecast(
+                meta['last_sequence'], n_months=forecast_months
+            )
+            predictions_original = processor.inverse_transform_predictions(
+                predictions_scaled, diseases
+            )
 
             forecast_dates   = build_forecast_dates(meta['last_date'], forecast_months)
-            predictions_dict = {d: clean_floats(predictions_original[d].tolist()) for d in diseases}
-
-            del forecaster
-            gc.collect()
+            predictions_dict = {
+                d: clean_floats(predictions_original[d].tolist()) for d in diseases
+            }
             return diseases, predictions_dict, meta['historical_dict'], forecast_dates
-        except Exception as e:
-            print(f"   ⚠️  Cache load failed ({e}) — retraining")
 
+        except Exception as e:
+            print(f"   ⚠️  Disk cache load failed ({e}) — retraining")
+            _model_memory_cache.pop(cache_key, None)
+
+    # ── 3. Full retrain (slowest — only on first run or cache miss) ───────────
     processor = DataProcessor(sequence_length=app.config['SEQUENCE_LENGTH'])
 
     if barangay == '__ALL__':
@@ -379,6 +447,7 @@ def run_lstm_for_barangay(barangay, city, target_diseases, forecast_months,
         **{d: clean_floats(df_filtered[d].fillna(0).tolist()) for d in diseases}
     }
 
+    # Save to disk cache
     try:
         forecaster.save_model(model_path)
         with open(meta_path, 'wb') as f:
@@ -390,11 +459,21 @@ def run_lstm_for_barangay(barangay, city, target_diseases, forecast_months,
                 'historical_dict': historical_dict,
                 'feature_cols':    feature_cols,
             }, f)
-        print(f"   💾 Model cached for {barangay}")
+        print(f"   💾 Model cached to disk for {barangay}")
     except Exception as e:
-        print(f"   ⚠️  Failed to cache model: {e}")
+        print(f"   ⚠️  Failed to cache model to disk: {e}")
 
-    del df_filtered, scaled_data, X, y, forecaster
+    # Promote to memory cache (don't del forecaster — keep it alive in cache)
+    _model_memory_cache[cache_key] = {
+        'forecaster':      forecaster,
+        'scalers':         processor.scalers,
+        'last_sequence':   last_sequence,
+        'last_date':       last_date,
+        'historical_dict': historical_dict,
+    }
+    print(f"   🧠 Model promoted to memory cache for {barangay}")
+
+    del df_filtered, scaled_data, X, y
     gc.collect()
 
     return diseases, predictions_dict, historical_dict, forecast_dates
