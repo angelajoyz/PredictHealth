@@ -32,30 +32,57 @@ const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api"
 const ALL_BARANGAYS = '__ALL__';
 const MAX_BARANGAY_SELECTION = 5;
 
+// ── FIX 1: checkDatasetReadyForForecast ──────────────────────────────────────
+// Dati: nag-block kahit same year ang forecast target (hindi December ang data)
+// Bago: block LANG kung walang data (no_data / invalid_date).
+//       Same-year forecast (e.g. data ends March 2026 → forecast 2026) = ALLOWED.
+//       Next-year forecast (e.g. data ends December 2026 → forecast 2027) = ALLOWED.
 const checkDatasetReadyForForecast = () => {
   const datasetEndRaw = localStorage.getItem('datasetEndDate') || '';
   if (!datasetEndRaw) return { ready: false, reason: 'no_data' };
   const parsed = new Date(datasetEndRaw);
   if (Number.isNaN(parsed.getTime())) return { ready: false, reason: 'invalid_date' };
-  const endMonth = parsed.getMonth();
+  const endMonth = parsed.getMonth(); // 0-indexed (11 = December)
   const endYear  = parsed.getFullYear();
-  if (endMonth !== 11) {
-    const monthName = parsed.toLocaleDateString('en-PH', { month: 'long' });
-    return { ready: false, reason: 'incomplete_year', endMonth: monthName, endYear, forecastYear: endYear + 1 };
+
+  if (endMonth === 11) {
+    // Data kumpleto hanggang December → forecast next year
+    return { ready: true, endYear, forecastYear: endYear + 1 };
   }
-  return { ready: true, endYear, forecastYear: endYear + 1 };
+  // Data kulang pa → forecast same year pa rin, PAYAGAN
+  return { ready: true, endYear, forecastYear: endYear };
 };
 
+// ── FIX 2: computeForecastParams ─────────────────────────────────────────────
+// Dati: laging forecastYear = dataYear + 1 (mali kung hindi pa December ang data)
+// Bago: kung hindi pa December ang data → same year ang forecast, simula sa
+//       buwan pagkatapos ng pinakabagong data.
 const computeForecastParams = () => {
   const now = new Date();
   const datasetEndRaw = localStorage.getItem('datasetEndDate') || '';
   let forecastYear = now.getFullYear();
+  let startMonth = 0; // January by default
+
   if (datasetEndRaw) {
     const parsed = new Date(datasetEndRaw);
-    if (!Number.isNaN(parsed.getTime())) forecastYear = parsed.getFullYear() + 1;
+    if (!Number.isNaN(parsed.getTime())) {
+      const endMonth = parsed.getMonth(); // 0-indexed
+      const endYear  = parsed.getFullYear();
+
+      if (endMonth === 11) {
+        // Data kumpleto hanggang Dec → forecast buong next year
+        forecastYear = endYear + 1;
+        startMonth = 0;
+      } else {
+        // Data kulang pa → forecast same year, simula sa susunod na buwan ng data
+        forecastYear = endYear;
+        startMonth = endMonth + 1;
+      }
+    }
   }
-  const reference = new Date(forecastYear, 0, 1);
-  const endOfYear = new Date(forecastYear, 11, 1);
+
+  const reference = new Date(forecastYear, startMonth, 1);
+  const endOfYear = new Date(forecastYear, 11, 1); // December ng forecast year
   const months = (endOfYear.getFullYear() - reference.getFullYear()) * 12
     + (endOfYear.getMonth() - reference.getMonth()) + 1;
   return { forecastMonths: Math.max(months, 1), referenceDate: reference, forecastYear };
@@ -609,7 +636,6 @@ const Dashboard = ({ onNavigate, onLogout, isPublic = false }) => {
       try {
         const token = localStorage.getItem('token');
 
-        // ── PUBLIC MODE: use public endpoints, no auth required ──
         if (isPublic) {
           const res = await fetch(`${API_BASE_URL}/public/dataset-info`);
           if (!res.ok) { setCheckingData(false); return; }
@@ -622,7 +648,6 @@ const Dashboard = ({ onNavigate, onLogout, isPublic = false }) => {
           return;
         }
 
-        // ── AUTHENTICATED MODE ──
         if (!token) { setCheckingData(false); return; }
         const res = await fetch(`${API_BASE_URL}/dataset-info`, { headers: { 'Authorization': `Bearer ${token}` } });
         if (!res.ok) { setCheckingData(false); return; }
@@ -631,7 +656,10 @@ const Dashboard = ({ onNavigate, onLogout, isPublic = false }) => {
         if (data.barangays?.length > 0) { setAvailableBarangays(data.barangays); setHasDbData(true); localStorage.setItem('availableBarangays', JSON.stringify(data.barangays)); }
         if (data.disease_columns?.length > 0) { setAvailableDiseases(data.disease_columns); localStorage.setItem('diseaseColumns', JSON.stringify(data.disease_columns)); }
         if (data.city) localStorage.setItem('datasetCity', data.city);
-        if (data.dataset_end_date) { localStorage.setItem('datasetEndDate', data.dataset_end_date); setDatasetReadiness(checkDatasetReadyForForecast()); }
+        if (data.dataset_end_date) {
+          localStorage.setItem('datasetEndDate', data.dataset_end_date);
+          setDatasetReadiness(checkDatasetReadyForForecast());
+        }
 
         if (data.available_forecast_years?.length > 0) {
           setAvailableForecastYears(data.available_forecast_years);
@@ -691,11 +719,9 @@ const Dashboard = ({ onNavigate, onLogout, isPublic = false }) => {
   useEffect(() => { if (selectedBarangay) localStorage.setItem('cachedForecastBarangay', selectedBarangay); }, [selectedBarangay]);
   useEffect(() => { localStorage.setItem('cachedForecastDisease', selectedDisease); }, [selectedDisease]);
 
-  // ── Load forecast when barangay OR selected year changes ─────────────────────
-// BAGO:
-useEffect(() => {
-  if (selectedForecastYear === null) return;
-  if (!isPublic && !hasDbData) return;
+  useEffect(() => {
+    if (selectedForecastYear === null) return;
+    if (!isPublic && !hasDbData) return;
     const city = localStorage.getItem('datasetCity') || '';
     setFetchingForecast(true);
     setForecastError('');
@@ -703,7 +729,6 @@ useEffect(() => {
 
     const token = localStorage.getItem('token');
 
-    // Public mode: use public forecast endpoint
     const url = isPublic
       ? `${API_BASE_URL}/public/forecast?barangay=${encodeURIComponent(selectedBarangay)}`
       : `${API_BASE_URL}/forecast-saved?barangay=${encodeURIComponent(selectedBarangay)}&city=${encodeURIComponent(city)}${selectedForecastYear !== forecastYear ? `&forecast_year=${selectedForecastYear}` : ''}`;
@@ -826,10 +851,10 @@ useEffect(() => {
 
   const handleGenerateClick = () => {
     if (!hasDbData || availableBarangays.length === 0) { setForecastError('No dataset found. Please upload in Data Import first.'); return; }
-    if (datasetReadiness && !datasetReadiness.ready && datasetReadiness.reason === 'incomplete_year') {
-      setForecastError(`Cannot generate forecast yet. Your dataset ends in ${datasetReadiness.endMonth} ${datasetReadiness.endYear}. Please upload data through December ${datasetReadiness.endYear} first.`);
-      return;
-    }
+    // ── FIX 3: Tanggalin ang old incomplete_year block check ──────────────────
+    // Dati: nag-block kahit same year ang target
+    // Bago: payagan na — checkDatasetReadyForForecast() na mismo ang bahala
+    //       sa pag-block (no_data / invalid_date lang ang blocks)
     setShowBarangaySelect(true);
   };
 
@@ -889,7 +914,8 @@ useEffect(() => {
     return `${thisMonthKey} – ${endOfYear}`;
   })();
 
-  const datasetNotReady = datasetReadiness && !datasetReadiness.ready && datasetReadiness.reason === 'incomplete_year';
+  // ── FIX 3 (cont): buttonDisabled — block lang kung walang data talaga ────────
+  const datasetNotReady = datasetReadiness && !datasetReadiness.ready;
   const buttonDisabled  = forecastLoading || !hasDbData || datasetNotReady;
   const buttonLabel     = forecastLoading ? 'Generating…' : 'Generate';
 
@@ -924,7 +950,6 @@ useEffect(() => {
 
       <BarangaySelectDialog open={showBarangaySelect} allBarangays={availableBarangays} forecastedBarangays={forecastedBarangays} forecastMonths={forecastMonths} referenceDate={referenceDate} onConfirm={handleBarangaySelectConfirm} onCancel={() => setShowBarangaySelect(false)} />
 
-      {/* ── KEY CHANGE: isPublic prop passed to Sidebar ── */}
       <Sidebar currentPage="dashboard" onNavigate={handleNavigate} onLogout={handleLogout} isPublic={isPublic} />
 
       <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
@@ -972,7 +997,7 @@ useEffect(() => {
                   </Select>
                 </Box>
                 {!isPublic && (
-                  <Tooltip title={datasetNotReady ? `Dataset must end in December ${datasetReadiness?.endYear} before forecasting` : ''} arrow>
+                  <Tooltip title={datasetNotReady ? 'No valid dataset found. Please upload data first.' : ''} arrow>
                     <span style={{ marginLeft: 'auto' }}>
                       <Button variant="contained" onClick={handleGenerateClick} disabled={buttonDisabled}
                         startIcon={forecastLoading ? <CircularProgress size={13} color="inherit" /> : datasetNotReady ? <LockIcon sx={{ fontSize: 15 }} /> : <PsychologyIcon sx={{ fontSize: 15 }} />}
