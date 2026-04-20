@@ -1,7 +1,23 @@
+# ── Memory & Threading optimizations (MUST be before any TF import) ──────────
+import os
+import threading
+
+os.environ['TF_CPP_MIN_LOG_LEVEL']      = '3'
+os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
+os.environ['OMP_NUM_THREADS']           = '1'
+os.environ['TF_NUM_INTEROP_THREADS']    = '1'
+os.environ['TF_NUM_INTRAOP_THREADS']    = '1'
+
+# Global semaphore — only ONE forecast can run at a time.
+# Prevents OOM crashes when multiple requests hit simultaneously
+# (e.g. a ping while a forecast is already running).
+_forecast_lock = threading.Semaphore(1)
+
+# ─────────────────────────────────────────────────────────────────────────────
+
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager, jwt_required, get_jwt_identity
-import os
 from dotenv import load_dotenv
 import re
 import hashlib
@@ -128,35 +144,27 @@ def save_forecast_flat(user_id, city, barangay, diseases, forecast_months,
     """
     Save forecast header + flat ForecastResult rows.
 
-    ── KEY CHANGE ──────────────────────────────────────────────────────────────
     Only delete the existing forecast for THIS barangay that belongs to the
     SAME forecast year (i.e. same year prefix in forecast_dates).
     Forecasts from previous years are kept intact so historical year data
     remains viewable in the frontend year selector.
-    ────────────────────────────────────────────────────────────────────────────
 
     Two types of rows are stored:
       1. Forecast rows   — forecast_period set,   historical_period = NULL
       2. Historical rows — historical_period set, forecast_period   = NULL
     """
-    # Determine which year this forecast covers
     forecast_year_prefix = forecast_dates[0][:4] if forecast_dates else None
 
-    # Only delete existing forecasts for this barangay that cover the SAME year
-    # so that 2024 forecasts are NOT deleted when saving 2025 forecasts
     old = Forecast.query.filter_by(barangay=barangay, city=city or None).all()
     for o in old:
-        # If we know the forecast year, only delete records from the same year
         if forecast_year_prefix and o.forecast_dates:
             same_year = any(d.startswith(forecast_year_prefix) for d in o.forecast_dates)
             if same_year:
                 db.session.delete(o)
         else:
-            # Fallback: delete all (original behaviour) if we can't determine year
             db.session.delete(o)
     db.session.flush()
 
-    # Create header record
     record = Forecast(
         user_id         = user_id,
         city            = city or None,
@@ -166,7 +174,7 @@ def save_forecast_flat(user_id, city, barangay, diseases, forecast_months,
         forecast_dates  = forecast_dates,
     )
     db.session.add(record)
-    db.session.flush()  # get record.id
+    db.session.flush()
 
     hist_dates = historical_dict.get('dates', [])
     rows = []
@@ -176,7 +184,6 @@ def save_forecast_flat(user_id, city, barangay, diseases, forecast_months,
         pred_vals = predictions_dict.get(disease_col, [])
         hist_vals = historical_dict.get(disease_col, [])
 
-        # ── Forecast rows (one per forecast period) ──────────
         for i, period in enumerate(forecast_dates):
             predicted = float(pred_vals[i]) if i < len(pred_vals) else 0.0
             rows.append(ForecastResult(
@@ -191,7 +198,6 @@ def save_forecast_flat(user_id, city, barangay, diseases, forecast_months,
                 historical_cases  = None,
             ))
 
-        # ── Historical rows (one per historical period) ──────
         for j, hperiod in enumerate(hist_dates):
             hval = float(hist_vals[j]) if j < len(hist_vals) else 0.0
             rows.append(ForecastResult(
@@ -377,12 +383,12 @@ def run_lstm_for_barangay(barangay, city, target_diseases, forecast_months,
         forecaster.save_model(model_path)
         with open(meta_path, 'wb') as f:
             pickle.dump({
-                'n_features':     len(feature_cols),
-                'scalers':        processor.scalers,
-                'last_sequence':  last_sequence,
-                'last_date':      last_date,
+                'n_features':      len(feature_cols),
+                'scalers':         processor.scalers,
+                'last_sequence':   last_sequence,
+                'last_date':       last_date,
                 'historical_dict': historical_dict,
-                'feature_cols':   feature_cols,
+                'feature_cols':    feature_cols,
             }, f)
         print(f"   💾 Model cached for {barangay}")
     except Exception as e:
@@ -394,9 +400,18 @@ def run_lstm_for_barangay(barangay, city, target_diseases, forecast_months,
     return diseases, predictions_dict, historical_dict, forecast_dates
 
 
+# ── KEEP-ALIVE PING (ultra-lightweight — no DB, no ML) ───────────────────────
+# Use /api/ping for any external monitoring tool instead of /api/health.
+# This wakes Render without touching any heavy resources.
+@app.route('/api/ping', methods=['GET'])
+def ping():
+    return jsonify({'status': 'ok'}), 200
+
+
 @app.route('/api/health', methods=['GET'])
 def health_check():
     return jsonify({'status': 'healthy', 'message': 'Backend is running'}), 200
+
 
 @app.route('/api/check-filename', methods=['GET'])
 @jwt_required()
@@ -482,13 +497,13 @@ def scan_file():
         gc.collect()
 
         return jsonify({
-            'barangays':      barangays,
+            'barangays':       barangays,
             'disease_columns': disease_columns,
-            'city':           city,
-            'city_detected':  bool(city),
-            'start_date':     start_date,
-            'end_date':       end_date,
-            'is_morbidity':   is_morbidity,
+            'city':            city,
+            'city_detected':   bool(city),
+            'start_date':      start_date,
+            'end_date':        end_date,
+            'is_morbidity':    is_morbidity,
         }), 200
 
     except Exception as e:
@@ -501,6 +516,7 @@ def scan_file():
                 os.remove(filepath)
             except Exception:
                 pass
+
 
 @app.route('/api/barangays', methods=['POST'])
 @jwt_required()
@@ -637,10 +653,14 @@ def get_barangays():
             pass
 
         return jsonify({
-            'barangays': barangays, 'disease_columns': disease_columns,
-            'city': city, 'city_detected': city_detected,
-            'start_date': start_date, 'end_date': end_date,
-            'upload_id': upload_record.id, 'is_morbidity': is_morbidity,
+            'barangays':       barangays,
+            'disease_columns': disease_columns,
+            'city':            city,
+            'city_detected':   city_detected,
+            'start_date':      start_date,
+            'end_date':        end_date,
+            'upload_id':       upload_record.id,
+            'is_morbidity':    is_morbidity,
         }), 200
 
     except Exception as e:
@@ -696,10 +716,10 @@ def get_climate():
         resolved_city = geo_data['results'][0].get('name', city)
 
         climate_res  = req.get('https://archive-api.open-meteo.com/v1/archive', params={
-            'latitude': lat, 'longitude': lng,
+            'latitude':  lat, 'longitude': lng,
             'start_date': start_date, 'end_date': end_date,
-            'monthly': 'temperature_2m_mean,precipitation_sum,relative_humidity_2m_mean',
-            'timezone': 'Asia/Manila',
+            'monthly':   'temperature_2m_mean,precipitation_sum,relative_humidity_2m_mean',
+            'timezone':  'Asia/Manila',
         }, timeout=30)
         climate_data = climate_res.json()
 
@@ -729,6 +749,7 @@ def get_climate():
         return jsonify({'error': str(e)}), 500
 
 
+# ── FORECAST FROM DB ──────────────────────────────────────────────────────────
 @app.route('/api/forecast-from-db', methods=['POST'])
 @jwt_required()
 def forecast_from_db():
@@ -742,6 +763,13 @@ def forecast_from_db():
 
     if not barangay:
         return jsonify({'error': 'Barangay not specified'}), 400
+
+    # Try to acquire the lock — if another forecast is already running, reject immediately
+    acquired = _forecast_lock.acquire(blocking=False)
+    if not acquired:
+        return jsonify({
+            'error': 'A forecast is already running. Please wait for it to finish before starting another.'
+        }), 429
 
     try:
         diseases, predictions_dict, historical_dict, forecast_dates = run_lstm_for_barangay(
@@ -757,7 +785,8 @@ def forecast_from_db():
         print(f"   💾 Forecast saved (id={record.id})")
 
         return jsonify({
-            'barangay':        barangay, 'city': city,
+            'barangay':        barangay,
+            'city':            city,
             'forecast_dates':  forecast_dates,
             'disease_columns': diseases,
             'predictions':     predictions_dict,
@@ -771,7 +800,12 @@ def forecast_from_db():
         print(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
 
+    finally:
+        # ALWAYS release the lock — even if an exception occurred
+        _forecast_lock.release()
 
+
+# ── FORECAST ALL BARANGAYS ────────────────────────────────────────────────────
 @app.route('/api/forecast-all', methods=['POST'])
 @jwt_required()
 def forecast_all():
@@ -781,6 +815,13 @@ def forecast_all():
     forecast_months = int(data.get('forecast_months', 6))
     city            = data.get('city', '')
     target_diseases = data.get('diseases', [])
+
+    # Try to acquire the lock — if another forecast is already running, reject immediately
+    acquired = _forecast_lock.acquire(blocking=False)
+    if not acquired:
+        return jsonify({
+            'error': 'A forecast is already running. Please wait for it to finish before starting another.'
+        }), 429
 
     try:
         barangays_q = db.session.query(BarangayData.barangay).distinct()
@@ -833,8 +874,11 @@ def forecast_all():
         print(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
 
+    finally:
+        # ALWAYS release the lock — even if an exception occurred
+        _forecast_lock.release()
 
-# ── NEW: Get forecast for a specific year ─────────────────────────────────────
+
 @app.route('/api/forecast-saved', methods=['GET'])
 @jwt_required()
 def get_saved_forecast():
@@ -842,10 +886,10 @@ def get_saved_forecast():
     barangay      = request.args.get('barangay', '').strip()
     city          = request.args.get('city', '').strip()
     forecast_year = request.args.get('forecast_year', '').strip()
- 
+
     if not barangay:
         return jsonify({'error': 'barangay is required'}), 400
- 
+
     try:
         if barangay == '__ALL__':
             result = get_all_saved_forecast_dict(city=city or None, forecast_year=forecast_year or None)
@@ -858,10 +902,7 @@ def get_saved_forecast():
                     'error': f'No saved forecast for {barangay}. Please run Generate first.',
                     'not_found': True,
                 }), 404
- 
-        # ── Attach actual BarangayData for the forecast year ──────────────
-        # This lets the frontend render real bars (actual) overlaid on the
-        # dashed prediction line for months that have been uploaded.
+
         fc_dates = result.get('forecast_dates', [])
         if fc_dates:
             year_str = fc_dates[0][:4]
@@ -869,7 +910,7 @@ def get_saved_forecast():
                 fc_year = int(year_str)
             except Exception:
                 fc_year = None
- 
+
             if fc_year:
                 q = db.session.query(
                     BarangayData.year,
@@ -877,21 +918,20 @@ def get_saved_forecast():
                     BarangayData.disease_category,
                     sqlfunc.sum(BarangayData.total_cases).label('total'),
                 ).filter(BarangayData.year == fc_year)
- 
+
                 if barangay != '__ALL__':
                     q = q.filter(BarangayData.barangay.ilike(barangay))
                 if city:
                     q = q.filter(BarangayData.city.ilike(f'%{city}%'))
- 
+
                 q = q.group_by(
                     BarangayData.year,
                     BarangayData.month,
                     BarangayData.disease_category,
                 ).order_by(BarangayData.year, BarangayData.month)
- 
+
                 rows = q.all()
- 
-                # period -> { 'disease_cases': value }
+
                 actual_map = {}
                 for r in rows:
                     period = f"{r.year}-{str(r.month).zfill(2)}"
@@ -899,14 +939,8 @@ def get_saved_forecast():
                     if period not in actual_map:
                         actual_map[period] = {}
                     actual_map[period][col] = float(r.total or 0)
- 
-                # Build actual_data aligned to forecast_dates
-                # Use disease_columns from result (or derive from predictions keys)
-                diseases = result.get('disease_columns', list(result.get('predictions', {}).keys()))
- 
-                # actual_data mirrors the shape of historical_data:
-                # { 'dates': [...], 'disease_col': [...], ... }
-                # Values are None for months with no uploaded data yet
+
+                diseases    = result.get('disease_columns', list(result.get('predictions', {}).keys()))
                 actual_data = {'dates': fc_dates}
                 for d in diseases:
                     vals = []
@@ -915,24 +949,22 @@ def get_saved_forecast():
                             val = actual_map[period].get(d, None)
                             vals.append(val)
                         else:
-                            vals.append(None)  # No data uploaded for this month
+                            vals.append(None)
                     actual_data[d] = vals
- 
+
                 result['actual_data'] = actual_data
- 
+
         return jsonify(result), 200
- 
+
     except Exception as e:
         import traceback
         print(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
 
 
-# ── NEW: Get all available forecast years for a barangay ─────────────────────
 @app.route('/api/forecast-years', methods=['GET'])
 @jwt_required()
 def get_forecast_years():
-    """Returns list of years that have saved forecasts, e.g. [2024, 2025]"""
     barangay = request.args.get('barangay', '').strip()
     city     = request.args.get('city', '').strip()
 
@@ -1055,6 +1087,7 @@ def disease_breakdown():
         print(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
 
+
 @app.route('/api/dataset-info', methods=['GET'])
 @jwt_required()
 def dataset_info():
@@ -1089,7 +1122,6 @@ def dataset_info():
             if month_row and month_row.max_month:
                 dataset_end_date = f"{end_row.max_year}-{str(month_row.max_month).zfill(2)}-01"
 
-        # Compute forecast_year from dataset_end_date
         forecast_year = None
         if dataset_end_date:
             try:
@@ -1098,10 +1130,9 @@ def dataset_info():
             except Exception:
                 pass
 
-        # Only return barangays forecasted FOR the current forecast_year
         forecasted_barangays = []
         if forecast_year:
-            year_prefix = str(forecast_year)
+            year_prefix   = str(forecast_year)
             all_forecasts = Forecast.query.with_entities(
                 Forecast.barangay, Forecast.forecast_dates
             ).all()
@@ -1111,9 +1142,8 @@ def dataset_info():
                 any(d.startswith(year_prefix) for d in f.forecast_dates)
             ))
 
-        # Also return all available forecast years in the DB (for the year selector)
         all_forecast_years = set()
-        all_year_records = Forecast.query.with_entities(Forecast.forecast_dates).all()
+        all_year_records   = Forecast.query.with_entities(Forecast.forecast_dates).all()
         for row in all_year_records:
             if row.forecast_dates:
                 for d in row.forecast_dates:
@@ -1123,13 +1153,13 @@ def dataset_info():
                         pass
 
         return jsonify({
-            'barangays':            barangays,
-            'disease_columns':      diseases,
-            'city':                 city_val,
-            'has_saved_forecasts':  has_saved_forecasts,
-            'dataset_end_date':     dataset_end_date,
-            'forecast_year':        forecast_year,
-            'forecasted_barangays': forecasted_barangays,
+            'barangays':                barangays,
+            'disease_columns':          diseases,
+            'city':                     city_val,
+            'has_saved_forecasts':      has_saved_forecasts,
+            'dataset_end_date':         dataset_end_date,
+            'forecast_year':            forecast_year,
+            'forecasted_barangays':     forecasted_barangays,
             'available_forecast_years': sorted(all_forecast_years, reverse=True),
         }), 200
 
@@ -1137,6 +1167,7 @@ def dataset_info():
         import traceback
         print(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
+
 
 @app.route('/api/barangay-data', methods=['GET'])
 @jwt_required()
@@ -1168,7 +1199,8 @@ def get_barangay_data():
         if month_filter:
             q = q.filter(BarangayData.month == month_filter)
 
-        q = q.order_by(BarangayData.barangay, BarangayData.year, BarangayData.month, BarangayData.disease_category)
+        q = q.order_by(BarangayData.barangay, BarangayData.year,
+                       BarangayData.month, BarangayData.disease_category)
 
         total   = q.count()
         records = q.offset((page - 1) * per_page).limit(per_page).all()
@@ -1180,11 +1212,11 @@ def get_barangay_data():
         months    = [r[0] for r in opts_q.with_entities(BarangayData.month).distinct().order_by(BarangayData.month).all()]
 
         return jsonify({
-            'total':      total,
-            'page':       page,
-            'per_page':   per_page,
-            'pages':      (total + per_page - 1) // per_page,
-            'records':    [r.to_dict() for r in records],
+            'total':    total,
+            'page':     page,
+            'per_page': per_page,
+            'pages':    (total + per_page - 1) // per_page,
+            'records':  [r.to_dict() for r in records],
             'filter_options': {
                 'barangays': barangays,
                 'diseases':  diseases,
@@ -1198,15 +1230,16 @@ def get_barangay_data():
         print(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
 
+
 @app.route('/api/upload-history', methods=['GET'])
 @jwt_required()
 def get_upload_history():
     current_user = get_current_user()
     try:
         uploads = UploadHistory.query.filter_by(
-        status='success'
+            status='success'
         ).order_by(UploadHistory.uploaded_at.desc()).all()
-        
+
         return jsonify([{
             'id':               u.id,
             'filename':         u.filename,
@@ -1224,6 +1257,7 @@ def get_upload_history():
         import traceback
         print(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
+
 
 @app.route('/api/upload-history/<int:upload_id>', methods=['DELETE'])
 @jwt_required()
@@ -1253,11 +1287,11 @@ def delete_upload_history(upload_id):
         print(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
 
+
 # ── PUBLIC ENDPOINTS (no auth required) ──────────────────────────────────────
 
 @app.route('/api/public/dataset-info', methods=['GET'])
 def public_dataset_info():
-    """Returns barangay list, disease columns, and city for public/landing page."""
     try:
         rows = db.session.query(
             BarangayData.barangay,
@@ -1271,13 +1305,13 @@ def public_dataset_info():
                 'city': '', 'has_saved_forecasts': False
             }), 200
 
-        barangays        = sorted(set(r.barangay for r in rows if r.barangay))
-        disease_columns  = sorted(set(
+        barangays       = sorted(set(r.barangay for r in rows if r.barangay))
+        disease_columns = sorted(set(
             f"{r.disease_category}_cases"
             for r in rows if r.disease_category
         ))
-        city_val         = rows[0].city or ''
-        has_saved        = Forecast.query.first() is not None
+        city_val  = rows[0].city or ''
+        has_saved = Forecast.query.first() is not None
 
         return jsonify({
             'barangays':           barangays,
@@ -1297,7 +1331,6 @@ def public_dataset_info():
 
 @app.route('/api/public/forecast', methods=['GET'])
 def public_forecast():
-    """Returns saved forecast data for public view (read-only, no auth)."""
     try:
         barangay = request.args.get('barangay', '__ALL__').strip()
 
@@ -1311,7 +1344,6 @@ def public_forecast():
         if not result:
             return jsonify({'not_found': True}), 200
 
-        # Attach barangay list so frontend can populate the dropdown
         barangay_rows = db.session.query(
             BarangayData.barangay
         ).distinct().order_by(BarangayData.barangay).all()
@@ -1328,7 +1360,6 @@ def public_forecast():
 
 @app.route('/api/public/disease-breakdown', methods=['GET'])
 def public_disease_breakdown():
-    """Public version of disease breakdown (no auth required)."""
     from sqlalchemy import func
     category = request.args.get('category', '').strip()
     barangay = request.args.get('barangay', '__ALL__').strip()
@@ -1388,8 +1419,8 @@ def public_disease_breakdown():
             ]
 
         return jsonify({
-            'category':      category,
-            'barangay':      barangay,
+            'category': category,
+            'barangay': barangay,
             'breakdown': [
                 {
                     'label':        r.disease_label or category.replace('_', ' ').title(),
@@ -1407,6 +1438,7 @@ def public_disease_breakdown():
         import traceback
         print(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
+
 
 if __name__ == '__main__':
     init_db(app)
