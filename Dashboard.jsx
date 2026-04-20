@@ -902,105 +902,108 @@ const Dashboard = ({ onNavigate, onLogout, isPublic = false }) => {
     return await fetch(url, options);
   };
 
-  const runGenerate = async (barangaysToGenerate) => {
-    setForecastLoading(true);
-    forecastLoadingRef.current = true; // ── FIX: set ref immediately so useEffect guard works
-    setForecastError('');
-    const total = barangaysToGenerate.length;
-    setGenOverlay({ visible: true, progress: 0, total, current: null, completed: [], failed: [] });
+const runGenerate = async (barangaysToGenerate) => {
+  setForecastLoading(true);
+  forecastLoadingRef.current = true;
+  setForecastError('');
+  const total = barangaysToGenerate.length;
+  const completed = [];
+  const failed = [];
 
-    const completedList = [];
-    const failedList    = [];
+  setGenOverlay({ visible: true, progress: 0, total, current: barangaysToGenerate[0], completed: [], failed: [] });
+
+  try {
+    const city  = localStorage.getItem('datasetCity') || '';
+    const token = localStorage.getItem('token');
+
+    for (let i = 0; i < barangaysToGenerate.length; i++) {
+      const brgy = barangaysToGenerate[i];
+
+      // Update overlay: show current barangay being processed
+      setGenOverlay(prev => ({
+        ...prev,
+        progress: i,
+        current: brgy,
+        completed: [...completed],
+        failed: [...failed],
+      }));
+
+      try {
+        const res = await fetch(`${API_BASE_URL}/forecast-all`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            forecast_months: forecastMonths,
+            city,
+            diseases: availableDiseases,
+            barangays: [brgy],   // ← one at a time
+          }),
+        });
+
+        const result = await res.json();
+        if (!res.ok) throw new Error(result.error || `HTTP ${res.status}`);
+
+        completed.push(brgy);
+      } catch (err) {
+        console.error(`Failed for ${brgy}:`, err);
+        failed.push(brgy);
+      }
+
+      // Update overlay after each barangay completes
+      setGenOverlay(prev => ({
+        ...prev,
+        progress: i + 1,
+        current: i + 1 < total ? barangaysToGenerate[i + 1] : null,
+        completed: [...completed],
+        failed: [...failed],
+      }));
+    }
+
+    // All done
+    setHasSavedForecasts(true);
+    setHasNewUpload(false);
+    localStorage.setItem('lastForecastGeneratedAt', new Date().toISOString());
+    setGenerateAllProgress({ completed: completed.length, total });
+
+    if (completed.length > 0) {
+      setForecastedBarangays(prev => Array.from(new Set([...prev, ...completed])));
+    }
+    if (failed.length > 0) {
+      setForecastError(`Done! ${completed.length}/${total} barangays completed. ${failed.length} failed.`);
+    }
+
+  } catch (err) {
+    setForecastError(err.message || 'Generate failed. Please try again.');
+  } finally {
+    setForecastLoading(false);
+    forecastLoadingRef.current = false;
+    setGenOverlay(prev => ({ ...prev, current: null }));
+    setAvailableForecastYears(prev =>
+      Array.from(new Set([forecastYear, ...prev])).sort((a, b) => b - a)
+    );
+    setSelectedForecastYear(forecastYear);
 
     try {
-      const city  = localStorage.getItem('datasetCity') || '';
       const token = localStorage.getItem('token');
-
-      for (let i = 0; i < barangaysToGenerate.length; i++) {
-        const brgy = barangaysToGenerate[i];
-
-        // Update overlay — only current barangay and progress counter, NOT completed list yet
-        // to avoid triggering unnecessary re-renders that could fire the forecast-saved useEffect
-        setGenOverlay(prev => ({ ...prev, current: brgy, progress: i }));
-
-        try {
-          // ── FIX: Use fetchWithRetry instead of plain fetch to handle 429 gracefully
-          const res = await fetchWithRetry(
-            `${API_BASE_URL}/forecast-from-db`,
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-              body: JSON.stringify({ barangay: brgy, diseases: availableDiseases, forecast_months: forecastMonths, city }),
-            }
-          );
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          completedList.push(brgy);
-        } catch (e) {
-          console.error(`Forecast failed for ${brgy}:`, e);
-          failedList.push(brgy);
-        }
-
-        // Update progress after each barangay completes
-        setGenOverlay(prev => ({
-          ...prev,
-          progress: i + 1,
-          completed: [...completedList],
-          failed: [...failedList],
-        }));
+      const saved = await fetch(
+        `${API_BASE_URL}/forecast-saved?barangay=${encodeURIComponent(selectedBarangay)}&city=${encodeURIComponent(localStorage.getItem('datasetCity') || '')}`,
+        { headers: { 'Authorization': `Bearer ${token}` } }
+      ).then(r => r.json()).catch(() => null);
+      if (saved && !saved.not_found) {
+        setForecastData(saved);
+        setForecastIsValid(isForecastValid(saved.forecast_dates));
       }
+    } catch (e) {}
 
-      // ── All barangays done — now safe to update state that triggers useEffect fetches
-      setHasSavedForecasts(true);
-      setHasNewUpload(false);
-      localStorage.setItem('lastForecastGeneratedAt', new Date().toISOString());
-      setGenerateAllProgress({ completed: completedList.length, total });
-      if (completedList.length > 0) {
-        setForecastedBarangays(prev => Array.from(new Set([...prev, ...completedList])));
-      }
-
-      if (failedList.length > 0) {
-        setForecastError(`Done! ${completedList.length}/${total} barangays completed. ${failedList.length} failed.`);
-      }
-
-    } catch (err) {
-      setForecastError(err.message || 'Generate failed. Please try again.');
-    } finally {
-      // ── FIX: Set forecastLoading to false BEFORE triggering state changes
-      // that would cause the forecast-saved useEffect to fire.
-      // Order matters: release the lock first, then update year selectors.
-      setForecastLoading(false);
-      forecastLoadingRef.current = false;
-
-      setGenOverlay(prev => ({ ...prev, current: null }));
-
-      // ── Now safe to update year state — forecastLoading is already false so
-      // the useEffect guard (forecastLoadingRef.current) will allow the fetch.
-      setAvailableForecastYears(prev => Array.from(new Set([forecastYear, ...prev])).sort((a, b) => b - a));
-      setSelectedForecastYear(forecastYear);
-
-      // Fetch the updated forecast for the currently selected barangay
-      if (completedList.length > 0) {
-        try {
-          const token = localStorage.getItem('token');
-          const saved = await fetch(
-            `${API_BASE_URL}/forecast-saved?barangay=${encodeURIComponent(selectedBarangay)}&city=${encodeURIComponent(localStorage.getItem('datasetCity') || '')}`,
-            { headers: { 'Authorization': `Bearer ${token}` } }
-          ).then(r => r.json()).catch(() => null);
-          if (saved && !saved.not_found) {
-            setForecastData(saved);
-            setForecastIsValid(isForecastValid(saved.forecast_dates));
-          }
-        } catch (e) {
-          console.error('Failed to fetch saved forecast after generation:', e);
-        }
-      }
-
-      setTimeout(() => {
-        setGenOverlay(prev => ({ ...prev, visible: false }));
-        setTimeout(() => setGenerateAllProgress(null), 4000);
-      }, 1500);
-    }
-  };
+    setTimeout(() => {
+      setGenOverlay(prev => ({ ...prev, visible: false }));
+      setTimeout(() => setGenerateAllProgress(null), 4000);
+    }, 1500);
+  }
+};
 
   const stats      = getSummaryStats();
   const chartData  = buildChartData();

@@ -441,10 +441,10 @@ def run_lstm_for_barangay(barangay, city, target_diseases, forecast_months,
     # ✅ FIX: Improved training with patience and validation split
     forecaster.train(
         X, y, 
-        epochs=app.config['EPOCHS'], 
-        batch_size=app.config['BATCH_SIZE'],
+        epochs=20, 
+        batch_size=64,
         validation_split=0.1,
-        patience=15  # Increased from default
+        patience=5  # Increased from default
     )
 
     last_sequence        = scaled_data.values[-app.config['SEQUENCE_LENGTH']:]
@@ -916,10 +916,15 @@ def forecast_all():
         }), 429
 
     try:
+        requested_barangays = data.get('barangays', [])  # ← from frontend
+
         barangays_q = db.session.query(BarangayData.barangay).distinct()
         if city:
             barangays_q = barangays_q.filter(BarangayData.city.ilike(f'%{city}%'))
-        barangays = [r.barangay for r in barangays_q.all() if r.barangay]
+        all_db_barangays = [r.barangay for r in barangays_q.all() if r.barangay]
+
+# Only run selected ones, or all if none specified
+        barangays = [b for b in all_db_barangays if b in requested_barangays] if requested_barangays else all_db_barangays
 
         if not barangays:
             return jsonify({'error': 'No barangays found in database.'}), 404
