@@ -907,72 +907,74 @@ const runGenerate = async (barangaysToGenerate) => {
   forecastLoadingRef.current = true;
   setForecastError('');
   const total = barangaysToGenerate.length;
-  const completed = [];
-  const failed = [];
 
-  setGenOverlay({ visible: true, progress: 0, total, current: barangaysToGenerate[0], completed: [], failed: [] });
+  setGenOverlay({
+    visible: true,
+    progress: 0,
+    total,
+    current: `Preparing ${total} barangay${total > 1 ? 's' : ''}…`,
+    completed: [],
+    failed: [],
+  });
 
   try {
     const city  = localStorage.getItem('datasetCity') || '';
     const token = localStorage.getItem('token');
 
-    for (let i = 0; i < barangaysToGenerate.length; i++) {
-      const brgy = barangaysToGenerate[i];
-
-      // Update overlay: show current barangay being processed
+    // ✅ Single batch request — backend handles the loop
+    // Simulate progress while waiting (backend doesn't stream yet)
+    let fakeProgress = 0;
+    const progressInterval = setInterval(() => {
+      fakeProgress = Math.min(fakeProgress + 1, total - 1);
+      const fakeCurrent = barangaysToGenerate[fakeProgress] || barangaysToGenerate[total - 1];
       setGenOverlay(prev => ({
         ...prev,
-        progress: i,
-        current: brgy,
-        completed: [...completed],
-        failed: [...failed],
+        progress: fakeProgress,
+        current: fakeCurrent,
       }));
+    }, 8000); // ~8s per barangay estimate
 
-      try {
-        const res = await fetch(`${API_BASE_URL}/forecast-all`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            forecast_months: forecastMonths,
-            city,
-            diseases: availableDiseases,
-            barangays: [brgy],   // ← one at a time
-          }),
-        });
+    const res = await fetch(`${API_BASE_URL}/forecast-all`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        forecast_months: forecastMonths,
+        city,
+        diseases: availableDiseases,
+        barangays: barangaysToGenerate,
+      }),
+    });
 
-        const result = await res.json();
-        if (!res.ok) throw new Error(result.error || `HTTP ${res.status}`);
+    clearInterval(progressInterval);
 
-        completed.push(brgy);
-      } catch (err) {
-        console.error(`Failed for ${brgy}:`, err);
-        failed.push(brgy);
-      }
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || `HTTP ${res.status}`);
 
-      // Update overlay after each barangay completes
-      setGenOverlay(prev => ({
-        ...prev,
-        progress: i + 1,
-        current: i + 1 < total ? barangaysToGenerate[i + 1] : null,
-        completed: [...completed],
-        failed: [...failed],
-      }));
-    }
+    const completedList = (result.results || []).map(r => r.barangay);
+    const failedList    = (result.failed_details || []).map(r => r.barangay);
 
-    // All done
+    // ✅ Show final state
+    setGenOverlay(prev => ({
+      ...prev,
+      progress: total,
+      current: null,
+      completed: completedList,
+      failed: failedList,
+    }));
+
     setHasSavedForecasts(true);
     setHasNewUpload(false);
     localStorage.setItem('lastForecastGeneratedAt', new Date().toISOString());
-    setGenerateAllProgress({ completed: completed.length, total });
+    setGenerateAllProgress({ completed: completedList.length, total });
 
-    if (completed.length > 0) {
-      setForecastedBarangays(prev => Array.from(new Set([...prev, ...completed])));
+    if (completedList.length > 0) {
+      setForecastedBarangays(prev => Array.from(new Set([...prev, ...completedList])));
     }
-    if (failed.length > 0) {
-      setForecastError(`Done! ${completed.length}/${total} barangays completed. ${failed.length} failed.`);
+    if (failedList.length > 0) {
+      setForecastError(`Done! ${completedList.length}/${total} barangays completed. ${failedList.length} failed.`);
     }
 
   } catch (err) {
