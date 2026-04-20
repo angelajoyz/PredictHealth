@@ -742,6 +742,7 @@ const Dashboard = ({ onNavigate, onLogout, isPublic = false }) => {
   useEffect(() => {
     if (selectedForecastYear === null) return;
     if (!isPublic && !hasDbData) return;
+    if (forecastLoading) return;
 
     // ── KEY FIX: Never fetch forecast-saved while a generation is running.
     // This prevents the 429 "another forecast is already running" error caused
@@ -777,7 +778,7 @@ const Dashboard = ({ onNavigate, onLogout, isPublic = false }) => {
       })
       .catch(() => { setForecastData(null); })
       .finally(() => setFetchingForecast(false));
-  }, [selectedBarangay, hasDbData, selectedForecastYear, forecastYear]);
+  }, [selectedBarangay, hasDbData, selectedForecastYear, forecastYear, forecastLoading]);
 
   const computeInsights = (history) => {
     if (!history?.length) return;
@@ -986,19 +987,27 @@ const runGenerate = async (barangaysToGenerate) => {
     setAvailableForecastYears(prev =>
       Array.from(new Set([forecastYear, ...prev])).sort((a, b) => b - a)
     );
-    setSelectedForecastYear(forecastYear);
 
-    try {
-      const token = localStorage.getItem('token');
-      const saved = await fetch(
-        `${API_BASE_URL}/forecast-saved?barangay=${encodeURIComponent(selectedBarangay)}&city=${encodeURIComponent(localStorage.getItem('datasetCity') || '')}`,
-        { headers: { 'Authorization': `Bearer ${token}` } }
-      ).then(r => r.json()).catch(() => null);
-      if (saved && !saved.not_found) {
-        setForecastData(saved);
-        setForecastIsValid(isForecastValid(saved.forecast_dates));
+
+   setTimeout(async () => {
+    setSelectedForecastYear(forecastYear);
+      try {
+        const token = localStorage.getItem('token');
+        const city  = localStorage.getItem('datasetCity') || '';
+        const saved = await fetch(
+          `${API_BASE_URL}/forecast-saved?barangay=${encodeURIComponent(ALL_BARANGAYS)}&city=${encodeURIComponent(city)}`,
+          { headers: { 'Authorization': `Bearer ${token}` } }
+        ).then(r => r.json()).catch(() => null);
+        if (saved && !saved.not_found) {
+          setForecastData(saved);
+          setForecastIsValid(isForecastValid(saved.forecast_dates));
+          setSelectedBarangay(ALL_BARANGAYS);
+        }
+        setSelectedForecastYear(forecastYear);
+      } catch (e) {
+        setSelectedForecastYear(forecastYear);
       }
-    } catch (e) {}
+    }, 800);
 
     setTimeout(() => {
       setGenOverlay(prev => ({ ...prev, visible: false }));
