@@ -27,6 +27,11 @@ from datetime import datetime, timedelta, date
 from dateutil.relativedelta import relativedelta
 from werkzeug.utils import secure_filename
 import gc
+import warnings
+
+# Suppress TensorFlow and Keras warnings
+warnings.filterwarnings('ignore', category=UserWarning)
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 from config import Config
 from database import (db, init_db, User, UploadHistory, Forecast, ForecastResult,
@@ -432,7 +437,15 @@ def run_lstm_for_barangay(barangay, city, target_diseases, forecast_months,
         n_outputs=len(diseases)
     )
     forecaster.build_model()
-    forecaster.train(X, y, epochs=app.config['EPOCHS'], batch_size=app.config['BATCH_SIZE'])
+    
+    # ✅ FIX: Improved training with patience and validation split
+    forecaster.train(
+        X, y, 
+        epochs=app.config['EPOCHS'], 
+        batch_size=app.config['BATCH_SIZE'],
+        validation_split=0.1,
+        patience=15  # Increased from default
+    )
 
     last_sequence        = scaled_data.values[-app.config['SEQUENCE_LENGTH']:]
     predictions_scaled   = forecaster.forecast(last_sequence, n_months=forecast_months)
