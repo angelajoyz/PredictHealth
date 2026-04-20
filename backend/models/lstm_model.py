@@ -135,8 +135,6 @@ class LSTMForecaster:
             validation_split=validation_split,
             callbacks=[early_stop],
             verbose=verbose,
-            workers=1,
-            use_multiprocessing=False,
         )
 
         epochs_trained = len(history.history['loss'])
