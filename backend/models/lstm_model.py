@@ -13,7 +13,7 @@ class LSTMForecaster:
 
     Optimized for small health datasets (24–48 months):
     - Lazy TensorFlow/Keras imports (faster startup)
-    - Compact architecture (32/16 LSTM units) for short time-series
+    - Deeper architecture (64/32/16 LSTM units) for better accuracy
     - Batched forecast() — single model.predict() call instead of a loop
     - EarlyStopping with min_delta for stable convergence
     """
@@ -53,36 +53,42 @@ class LSTMForecaster:
         """
         Build LSTM model using the Functional API.
 
-        Architecture (optimized for small datasets):
-          - LSTM(32) → keeps capacity for temporal patterns without overfitting
-          - LSTM(16) → further compression before dense head
-          - Dense(16) → non-linear projection
+        Architecture (optimized for accuracy on small health datasets):
+          - LSTM(64) → captures broad temporal patterns
+          - LSTM(32) → mid-level abstraction
+          - LSTM(16) → compressed representation before dense head
+          - Dense(32) → non-linear projection
+          - Dense(16) → further refinement
           - Dense(n_outputs) → final forecast
 
-        Dropout(0.2) applied after each LSTM layer to regularise on short data.
-        recurrent_dropout removed for CPU-only compatibility (cuDNN kernel).
-
-        Speedup vs a 64/32-unit architecture: ~2.5× faster per epoch.
+        Uses tanh activation (better for LSTM time series than relu).
+        Uses Huber loss (robust to outliers in health data).
+        Lower learning rate (0.0005) for more precise convergence.
         """
         tf, Model, Input, LSTM, Dense, Dropout, _, Adam = self._get_keras()
 
         inputs = Input(shape=(self.sequence_length, self.n_features))
 
-        x = LSTM(32, activation='relu', return_sequences=True)(inputs)
+        x = LSTM(64, activation='tanh', return_sequences=True)(inputs)
         x = Dropout(0.2)(x)
 
-        x = LSTM(16, activation='relu', return_sequences=False)(x)
+        x = LSTM(32, activation='tanh', return_sequences=True)(x)
         x = Dropout(0.2)(x)
+
+        x = LSTM(16, activation='tanh', return_sequences=False)(x)
+        x = Dropout(0.1)(x)
+
+        x = Dense(32, activation='relu')(x)
+        x = Dropout(0.1)(x)
 
         x = Dense(16, activation='relu')(x)
-        x = Dropout(0.1)(x)
 
         outputs = Dense(self.n_outputs)(x)
 
         self.model = Model(inputs=inputs, outputs=outputs)
         self.model.compile(
-            optimizer=Adam(learning_rate=0.001),
-            loss='mse',
+            optimizer=Adam(learning_rate=0.0005),
+            loss='huber',
             metrics=['mae'],
         )
 
@@ -96,8 +102,8 @@ class LSTMForecaster:
     # Training
     # ------------------------------------------------------------------
 
-    def train(self, X, y, epochs=150, batch_size=8,
-              validation_split=0.1, patience=8, verbose=0):
+    def train(self, X, y, epochs=100, batch_size=16,
+              validation_split=0.2, patience=15, verbose=0):
         """
         Train the LSTM model with early stopping.
 
@@ -107,8 +113,7 @@ class LSTMForecaster:
             epochs:           Maximum training epochs
             batch_size:       Batch size
             validation_split: Fraction of data reserved for validation
-            patience:         Early-stopping patience (default 8 — fast convergence
-                              on short datasets; restore_best_weights preserves quality)
+            patience:         Early-stopping patience
             verbose:          Keras verbosity (0 = silent)
         """
         if self.model is None:

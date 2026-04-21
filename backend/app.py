@@ -441,10 +441,10 @@ def run_lstm_for_barangay(barangay, city, target_diseases, forecast_months,
     # ✅ FIX: Improved training with patience and validation split
     forecaster.train(
         X, y, 
-        epochs=20, 
-        batch_size=64,
-        validation_split=0.1,
-        patience=5  # Increased from default
+        epochs=100, 
+        batch_size=16,
+        validation_split=0.2,
+        patience=15  # Increased from default
     )
 
     last_sequence        = scaled_data.values[-app.config['SEQUENCE_LENGTH']:]
