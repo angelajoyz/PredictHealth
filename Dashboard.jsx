@@ -988,9 +988,7 @@ const runGenerate = async (barangaysToGenerate) => {
       Array.from(new Set([forecastYear, ...prev])).sort((a, b) => b - a)
     );
 
-
-   setTimeout(async () => {
-    setSelectedForecastYear(forecastYear);
+setTimeout(async () => {
       try {
         const token = localStorage.getItem('token');
         const city  = localStorage.getItem('datasetCity') || '';
@@ -1003,9 +1001,9 @@ const runGenerate = async (barangaysToGenerate) => {
           setForecastIsValid(isForecastValid(saved.forecast_dates));
           setSelectedBarangay(ALL_BARANGAYS);
         }
-        setSelectedForecastYear(forecastYear);
+        setSelectedForecastYear(forecastYear); // ✅ pagkatapos ng fetch
       } catch (e) {
-        setSelectedForecastYear(forecastYear);
+        setSelectedForecastYear(forecastYear); // ✅ kahit mag-error
       }
     }, 800);
 
