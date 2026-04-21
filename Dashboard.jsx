@@ -30,7 +30,7 @@ import Sidebar, { T } from './Sidebar';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 const ALL_BARANGAYS = '__ALL__';
-const MAX_BARANGAY_SELECTION = 3;
+const MAX_BARANGAY_SELECTION = 5;
 
 const computeForecastParams = () => {
   const now = new Date();
