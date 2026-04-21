@@ -122,23 +122,24 @@ class LSTMForecaster:
         current_sequence = np.copy(last_sequence)
 
         for _ in range(n_months):
-            batch_input = current_sequence[np.newaxis, :, :]         # (1, seq_len, n_features)
+            batch_input = current_sequence[np.newaxis, :, :]          # (1, seq_len, n_features)
             pred        = self.model.predict(batch_input, verbose=0)[0]  # (n_outputs,)
             predictions.append(pred)
 
             # Build next row: copy last known features, then overwrite
             # feature[0] (the target / cases column) with the prediction.
-            # If your feature order is [cases, lag_1, lag_2, ...] update
-            # the lag columns too so the window stays internally consistent.
+            # Lag features shift forward so the window stays internally consistent:
+            #   index 0 = cases_t  → new prediction
+            #   index 1 = lag_1    → current prediction (becomes previous cases next step)
+            #   index 2 = lag_2    → previous cases (old lag_1 value)
             new_row    = np.copy(current_sequence[-1])
-            new_row[0] = pred[0]                         # target feature ← predicted value
+            new_row[0] = pred[0]                          # cases ← new prediction
 
-            # Update lag features if present (assumes feature layout:
-            #   index 0 = cases, index 1 = lag_1, index 2 = lag_2)
+            # ✅ FIXED: lag features shift properly
             if self.n_features >= 2:
-                new_row[1] = current_sequence[-1][0]     # lag_1 ← previous cases
+                new_row[1] = pred[0]                      # lag_1 ← current prediction
             if self.n_features >= 3:
-                new_row[2] = current_sequence[-2][0]     # lag_2 ← two steps back
+                new_row[2] = current_sequence[-1][0]      # lag_2 ← previous cases
 
             current_sequence = np.vstack([
                 current_sequence[1:],
