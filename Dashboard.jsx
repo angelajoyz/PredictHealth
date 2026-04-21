@@ -30,7 +30,7 @@ import Sidebar, { T } from './Sidebar';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 const ALL_BARANGAYS = '__ALL__';
-const MAX_BARANGAY_SELECTION = 5;
+const MAX_BARANGAY_SELECTION = 3;
 
 const computeForecastParams = () => {
   const now = new Date();
@@ -925,15 +925,19 @@ const runGenerate = async (barangaysToGenerate) => {
     // ✅ Single batch request — backend handles the loop
     // Simulate progress while waiting (backend doesn't stream yet)
     let fakeProgress = 0;
-    const progressInterval = setInterval(() => {
+const progressInterval = setInterval(() => {
       fakeProgress = Math.min(fakeProgress + 1, total - 1);
       const fakeCurrent = barangaysToGenerate[fakeProgress] || barangaysToGenerate[total - 1];
-      setGenOverlay(prev => ({
-        ...prev,
-        progress: fakeProgress,
-        current: fakeCurrent,
-      }));
-    }, 8000); // ~8s per barangay estimate
+      setGenOverlay(prev => {
+        // ✅ Huwag mag-update kung tapos na ang request
+        if (prev.progress >= prev.total) return prev;
+        return {
+          ...prev,
+          progress: fakeProgress,
+          current: fakeCurrent,
+        };
+      });
+    }, 8000);
 
     const res = await fetch(`${API_BASE_URL}/forecast-all`, {
       method: 'POST',
