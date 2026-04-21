@@ -950,6 +950,7 @@ const progressInterval = setInterval(() => {
         city,
         diseases: availableDiseases,
         barangays: barangaysToGenerate,
+        forecast_year: forecastYear, 
       }),
     });
 

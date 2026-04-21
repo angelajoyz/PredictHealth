@@ -9,8 +9,6 @@ os.environ['TF_NUM_INTEROP_THREADS']    = '1'
 os.environ['TF_NUM_INTRAOP_THREADS']    = '1'
 
 # Global semaphore — only ONE forecast can run at a time.
-# Prevents OOM crashes when multiple requests hit simultaneously
-# (e.g. a ping while a forecast is already running).
 _forecast_lock = threading.Semaphore(1)
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -29,7 +27,6 @@ from werkzeug.utils import secure_filename
 import gc
 import warnings
 
-# Suppress TensorFlow and Keras warnings
 warnings.filterwarnings('ignore', category=UserWarning)
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
@@ -54,7 +51,6 @@ db.init_app(app)
 jwt = JWTManager(app)
 mail = Mail(app)
 
-# ── Pre-warm TensorFlow on startup (eliminates cold-start delay per barangay) ──
 def _warm_up_tensorflow():
     try:
         import numpy as np
@@ -98,7 +94,6 @@ app.register_blueprint(admin_bp, url_prefix='/api/admin')
 def after_request(response):
     return response
 
-# ── JWT error handlers — return 401 JSON instead of default HTML ──────────────
 @jwt.unauthorized_loader
 def unauthorized_callback(reason):
     return jsonify({'error': 'Not logged in. Please log in first.', 'code': 'UNAUTHORIZED'}), 401
@@ -143,19 +138,32 @@ def clean_floats(lst):
     return result
 
 
-def build_forecast_dates(last_date, forecast_months):
-    """Start forecasting from the month after the last available historical date."""
-    if isinstance(last_date, str):
-        try:
-            last_date = datetime.strptime(last_date[:10], '%Y-%m-%d').date()
-        except Exception:
-            last_date = date.today()
-    elif isinstance(last_date, datetime):
-        last_date = last_date.date()
-    elif not isinstance(last_date, date):
-        last_date = date.today()
+def build_forecast_dates(last_date, forecast_months, start_from=None):
+    """
+    Build forecast date list.
 
-    reference = datetime(last_date.year, last_date.month, 1) + relativedelta(months=1)
+    If start_from is provided (e.g. '2026-04'), use that as the start month.
+    Otherwise, start from the month after the last available historical date.
+    """
+    if start_from:
+        # start_from is 'YYYY-MM' format
+        try:
+            reference = datetime.strptime(start_from + '-01', '%Y-%m-%d')
+        except Exception:
+            reference = datetime.today().replace(day=1)
+    else:
+        if isinstance(last_date, str):
+            try:
+                last_date = datetime.strptime(last_date[:10], '%Y-%m-%d').date()
+            except Exception:
+                last_date = date.today()
+        elif isinstance(last_date, datetime):
+            last_date = last_date.date()
+        elif not isinstance(last_date, date):
+            last_date = date.today()
+
+        reference = datetime(last_date.year, last_date.month, 1) + relativedelta(months=1)
+
     return [
         (reference + relativedelta(months=i)).strftime('%Y-%m')
         for i in range(forecast_months)
@@ -168,13 +176,7 @@ def save_forecast_flat(user_id, city, barangay, diseases, forecast_months,
     Save forecast header + flat ForecastResult rows.
 
     Only delete the existing forecast for THIS barangay that belongs to the
-    SAME forecast year (i.e. same year prefix in forecast_dates).
-    Forecasts from previous years are kept intact so historical year data
-    remains viewable in the frontend year selector.
-
-    Two types of rows are stored:
-      1. Forecast rows   — forecast_period set,   historical_period = NULL
-      2. Historical rows — historical_period set, forecast_period   = NULL
+    SAME forecast year. Forecasts from previous years are kept intact.
     """
     forecast_year_prefix = forecast_dates[0][:4] if forecast_dates else None
 
@@ -310,26 +312,30 @@ def _get_cache_paths(cache_key):
 
 
 def _clear_model_cache():
-    # Clear disk cache
     folder = app.config['MODEL_FOLDER']
     for fname in os.listdir(folder):
         try:
             os.remove(os.path.join(folder, fname))
         except Exception:
             pass
-    # Also clear in-memory cache so stale models are not reused after new upload
     _model_memory_cache.clear()
     print("   🗑️  Model cache cleared (disk + memory)")
 
 
-# In-memory cache: cache_key → dict with forecaster + meta
-# Survives across requests within the same Render worker process.
-# Wiped automatically on new file upload via _clear_model_cache().
 _model_memory_cache = {}
 
 
 def run_lstm_for_barangay(barangay, city, target_diseases, forecast_months,
-                           df_merged=None):
+                           df_merged=None, start_from=None):
+    """
+    Run LSTM forecasting for a single barangay.
+
+    Args:
+        start_from: If provided (e.g. '2026-04'), forecast dates will start
+                    from this month instead of the month after the last data point.
+                    Used when barangay already has partial forecast and we only
+                    need to generate remaining months.
+    """
     if df_merged is None:
         aggregated = get_aggregated_data(city=city or None, barangay=barangay)
         if not aggregated:
@@ -341,10 +347,26 @@ def run_lstm_for_barangay(barangay, city, target_diseases, forecast_months,
     if not diseases:
         raise ValueError('No valid disease columns found')
 
+    # ── Compute actual forecast_months if start_from is given ────────────────
+    actual_forecast_months = forecast_months
+    if start_from:
+        try:
+            start_dt = datetime.strptime(start_from + '-01', '%Y-%m-%d')
+            # Compute end of year
+            end_of_year = datetime(start_dt.year, 12, 1)
+            actual_forecast_months = (
+                (end_of_year.year - start_dt.year) * 12 +
+                (end_of_year.month - start_dt.month) + 1
+            )
+            actual_forecast_months = max(actual_forecast_months, 1)
+            print(f"   📅 start_from={start_from} → generating {actual_forecast_months} months")
+        except Exception:
+            pass
+
     cache_key = _make_cache_key(barangay, city, diseases)
     model_path, meta_path = _get_cache_paths(cache_key)
 
-    # ── 1. In-memory cache (fastest — no disk I/O, no model reload) ──────────
+    # ── 1. In-memory cache ────────────────────────────────────────────────────
     if cache_key in _model_memory_cache:
         try:
             print(f"   ⚡⚡ Memory cache hit for {barangay}")
@@ -354,13 +376,15 @@ def run_lstm_for_barangay(barangay, city, target_diseases, forecast_months,
             processor.scalers = cached['scalers']
 
             predictions_scaled   = cached['forecaster'].forecast(
-                cached['last_sequence'], n_months=forecast_months
+                cached['last_sequence'], n_months=actual_forecast_months
             )
             predictions_original = processor.inverse_transform_predictions(
                 predictions_scaled, diseases
             )
 
-            forecast_dates   = build_forecast_dates(cached['last_date'], forecast_months)
+            forecast_dates   = build_forecast_dates(
+                cached['last_date'], actual_forecast_months, start_from=start_from
+            )
             predictions_dict = {
                 d: clean_floats(predictions_original[d].tolist()) for d in diseases
             }
@@ -369,7 +393,7 @@ def run_lstm_for_barangay(barangay, city, target_diseases, forecast_months,
             print(f"   ⚠️  Memory cache failed ({e}) — falling back to disk")
             _model_memory_cache.pop(cache_key, None)
 
-    # ── 2. Disk cache (fast — no retraining, just reload weights) ────────────
+    # ── 2. Disk cache ─────────────────────────────────────────────────────────
     if os.path.exists(model_path) and os.path.exists(meta_path):
         try:
             print(f"   ⚡ Disk cache hit — loading trained model for {barangay}")
@@ -383,7 +407,6 @@ def run_lstm_for_barangay(barangay, city, target_diseases, forecast_months,
             )
             forecaster.load_model(model_path)
 
-            # Promote to memory cache so next request is instant
             _model_memory_cache[cache_key] = {
                 'forecaster':      forecaster,
                 'scalers':         meta['scalers'],
@@ -396,13 +419,15 @@ def run_lstm_for_barangay(barangay, city, target_diseases, forecast_months,
             processor.scalers = meta['scalers']
 
             predictions_scaled   = forecaster.forecast(
-                meta['last_sequence'], n_months=forecast_months
+                meta['last_sequence'], n_months=actual_forecast_months
             )
             predictions_original = processor.inverse_transform_predictions(
                 predictions_scaled, diseases
             )
 
-            forecast_dates   = build_forecast_dates(meta['last_date'], forecast_months)
+            forecast_dates   = build_forecast_dates(
+                meta['last_date'], actual_forecast_months, start_from=start_from
+            )
             predictions_dict = {
                 d: clean_floats(predictions_original[d].tolist()) for d in diseases
             }
@@ -412,7 +437,7 @@ def run_lstm_for_barangay(barangay, city, target_diseases, forecast_months,
             print(f"   ⚠️  Disk cache load failed ({e}) — retraining")
             _model_memory_cache.pop(cache_key, None)
 
-    # ── 3. Full retrain (slowest — only on first run or cache miss) ───────────
+    # ── 3. Full retrain ───────────────────────────────────────────────────────
     processor = DataProcessor(sequence_length=app.config['SEQUENCE_LENGTH'])
 
     if barangay == '__ALL__':
@@ -437,22 +462,20 @@ def run_lstm_for_barangay(barangay, city, target_diseases, forecast_months,
         n_outputs=len(diseases)
     )
     forecaster.build_model()
-    
-    # ✅ FIX: Improved training with patience and validation split
     forecaster.train(
-        X, y, 
-        epochs=100, 
+        X, y,
+        epochs=100,
         batch_size=16,
         validation_split=0.2,
-        patience=15  # Increased from default
+        patience=15
     )
 
     last_sequence        = scaled_data.values[-app.config['SEQUENCE_LENGTH']:]
-    predictions_scaled   = forecaster.forecast(last_sequence, n_months=forecast_months)
+    predictions_scaled   = forecaster.forecast(last_sequence, n_months=actual_forecast_months)
     predictions_original = processor.inverse_transform_predictions(predictions_scaled, diseases)
 
     last_date      = df_filtered['date'].max()
-    forecast_dates = build_forecast_dates(last_date, forecast_months)
+    forecast_dates = build_forecast_dates(last_date, actual_forecast_months, start_from=start_from)
 
     predictions_dict = {d: clean_floats(predictions_original[d].tolist()) for d in diseases}
     historical_dict  = {
@@ -476,7 +499,6 @@ def run_lstm_for_barangay(barangay, city, target_diseases, forecast_months,
     except Exception as e:
         print(f"   ⚠️  Failed to cache model to disk: {e}")
 
-    # Promote to memory cache (don't del forecaster — keep it alive in cache)
     _model_memory_cache[cache_key] = {
         'forecaster':      forecaster,
         'scalers':         processor.scalers,
@@ -492,9 +514,7 @@ def run_lstm_for_barangay(barangay, city, target_diseases, forecast_months,
     return diseases, predictions_dict, historical_dict, forecast_dates
 
 
-# ── KEEP-ALIVE PING (ultra-lightweight — no DB, no ML) ───────────────────────
-# Use /api/ping for any external monitoring tool instead of /api/health.
-# This wakes Render without touching any heavy resources.
+# ── KEEP-ALIVE PING ───────────────────────────────────────────────────────────
 @app.route('/api/ping', methods=['GET'])
 def ping():
     return jsonify({'status': 'ok'}), 200
@@ -856,7 +876,6 @@ def forecast_from_db():
     if not barangay:
         return jsonify({'error': 'Barangay not specified'}), 400
 
-    # Try to acquire the lock — if another forecast is already running, reject immediately
     acquired = _forecast_lock.acquire(blocking=False)
     if not acquired:
         return jsonify({
@@ -893,7 +912,6 @@ def forecast_from_db():
         return jsonify({'error': str(e)}), 500
 
     finally:
-        # ALWAYS release the lock — even if an exception occurred
         _forecast_lock.release()
 
 
@@ -907,8 +925,8 @@ def forecast_all():
     forecast_months = int(data.get('forecast_months', 6))
     city            = data.get('city', '')
     target_diseases = data.get('diseases', [])
+    forecast_year   = data.get('forecast_year', None)
 
-    # Try to acquire the lock — if another forecast is already running, reject immediately
     acquired = _forecast_lock.acquire(blocking=False)
     if not acquired:
         return jsonify({
@@ -916,28 +934,77 @@ def forecast_all():
         }), 429
 
     try:
-        requested_barangays = data.get('barangays', [])  # ← from frontend
+        requested_barangays = data.get('barangays', [])
 
         barangays_q = db.session.query(BarangayData.barangay).distinct()
         if city:
             barangays_q = barangays_q.filter(BarangayData.city.ilike(f'%{city}%'))
         all_db_barangays = [r.barangay for r in barangays_q.all() if r.barangay]
 
-# Only run selected ones, or all if none specified
         barangays = [b for b in all_db_barangays if b in requested_barangays] if requested_barangays else all_db_barangays
 
         if not barangays:
             return jsonify({'error': 'No barangays found in database.'}), 404
 
+        # ── Detect actual data end date from DB ───────────────────────────────
+        from sqlalchemy import func as sqlfunc
+        end_row = db.session.query(
+            sqlfunc.max(BarangayData.year).label('max_year'),
+        ).first()
+        actual_end_month = None
+        if end_row and end_row.max_year:
+            month_row = db.session.query(
+                sqlfunc.max(BarangayData.month).label('max_month')
+            ).filter(BarangayData.year == end_row.max_year).first()
+            if month_row and month_row.max_month:
+                actual_end_month = f"{end_row.max_year}-{str(month_row.max_month).zfill(2)}"
+
         print(f"🚀 Starting forecast-all for {len(barangays)} barangays...")
+        print(f"   📅 Actual data end month: {actual_end_month}")
+        print(f"   📅 Forecast year: {forecast_year}")
+
         results = []
         failed  = []
 
         for brgy in barangays:
             try:
                 print(f"🧠 Training for: {brgy}")
+
+                # ── Smart start_from detection ────────────────────────────────
+                start_from = None
+                if forecast_year and actual_end_month:
+                    year_str = str(forecast_year)
+                    actual_year  = int(actual_end_month[:4])
+                    actual_month = int(actual_end_month[5:7])
+
+                    # Check if this barangay already has a forecast for this year
+                    existing_forecasts = Forecast.query.filter_by(barangay=brgy).all()
+                    has_existing = any(
+                        f.forecast_dates and any(d.startswith(year_str) for d in f.forecast_dates)
+                        for f in existing_forecasts
+                    )
+
+                    if has_existing and actual_year == int(forecast_year):
+                        # Has existing forecast AND we have actual data for part of the year
+                        # → Generate only from month after actual data end
+                        next_month = actual_month + 1
+                        next_year  = actual_year
+                        if next_month > 12:
+                            next_month = 1
+                            next_year += 1
+                        start_from = f"{next_year}-{str(next_month).zfill(2)}"
+                        print(f"   📅 {brgy}: existing forecast + actual data → generating from {start_from}")
+                    else:
+                        # No existing forecast OR actual data is from previous year
+                        # → Generate full year from Jan
+                        start_from = f"{forecast_year}-01"
+                        print(f"   📅 {brgy}: no existing forecast → generating full year from {start_from}")
+
                 diseases, predictions_dict, historical_dict, forecast_dates = \
-                    run_lstm_for_barangay(brgy, city, target_diseases, forecast_months)
+                    run_lstm_for_barangay(
+                        brgy, city, target_diseases, forecast_months,
+                        start_from=start_from
+                    )
 
                 record = save_forecast_flat(
                     user_id=current_user.id, city=city, barangay=brgy,
@@ -946,8 +1013,11 @@ def forecast_all():
                     predictions_dict=predictions_dict, historical_dict=historical_dict,
                 )
 
-                results.append({'barangay': brgy, 'forecast_id': record.id,
-                                'forecast_dates': forecast_dates})
+                results.append({
+                    'barangay':      brgy,
+                    'forecast_id':   record.id,
+                    'forecast_dates': forecast_dates,
+                })
                 print(f"   ✅ Done: {brgy}")
 
             except Exception as e:
@@ -972,7 +1042,6 @@ def forecast_all():
         return jsonify({'error': str(e)}), 500
 
     finally:
-        # ALWAYS release the lock — even if an exception occurred
         _forecast_lock.release()
 
 
@@ -1223,7 +1292,11 @@ def dataset_info():
         if dataset_end_date:
             try:
                 end_dt = datetime.strptime(dataset_end_date[:10], '%Y-%m-%d')
-                forecast_year = end_dt.year + 1
+                # If data ends in December, forecast next year; otherwise forecast same year
+                if end_dt.month == 12:
+                    forecast_year = end_dt.year + 1
+                else:
+                    forecast_year = end_dt.year
             except Exception:
                 pass
 
@@ -1385,7 +1458,7 @@ def delete_upload_history(upload_id):
         return jsonify({'error': str(e)}), 500
 
 
-# ── PUBLIC ENDPOINTS (no auth required) ──────────────────────────────────────
+# ── PUBLIC ENDPOINTS ──────────────────────────────────────────────────────────
 
 @app.route('/api/public/dataset-info', methods=['GET'])
 def public_dataset_info():
