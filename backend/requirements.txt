@@ -20,7 +20,7 @@ scipy==1.14.1
 python-dateutil==2.9.0
 
 # ML
-tensorflow-cpu==2.15.0
+tensorflow-cpu==2.21.0
 
 # HTTP (climate API)
 requests==2.32.3
