@@ -14,7 +14,7 @@ class LSTMForecaster:
     Optimized for small health datasets (24–48 months):
     - Lazy TensorFlow/Keras imports (faster startup)
     - Deeper architecture (64/32/16 LSTM units) for better accuracy
-    - Batched forecast() — single model.predict() call instead of a loop
+    - forecast() accepts target_indices so it knows which columns to update
     - EarlyStopping with min_delta for stable convergence
     """
 
@@ -99,47 +99,94 @@ class LSTMForecaster:
 
         return history
 
-    def forecast(self, last_sequence, n_months=6):
+    def forecast(self, last_sequence, n_months=6, target_indices=None, feature_cols=None):
         """
         Generate forecasts using autoregressive (rolling) prediction.
 
-        Each predicted value is fed back into the input window so future
-        steps genuinely depend on prior predictions — preventing the
-        flat/repeating forecast bug caused by reusing the last known row.
+        Correctly updates only the target + lag + rolling columns each step,
+        leaving climate and other exogenous features unchanged.
 
         Args:
-            last_sequence: Last sequence from training data,
-                           shape (sequence_length, n_features)
-            n_months:      Number of months to forecast
+            last_sequence:  shape (sequence_length, n_features)
+            n_months:       number of months to forecast
+            target_indices: list of int — which feature columns are the targets
+                            e.g. [8] if dengue_cases is at index 8
+                            Defaults to [0] for backward compatibility
+            feature_cols:   list of str — feature column names in order
+                            Used to find lag/rolling columns automatically
 
         Returns:
-            predictions:   shape (n_months, n_outputs)
+            predictions:    shape (n_months, n_outputs)
         """
         if self.model is None:
             raise ValueError("Model not built. Call build_model() first.")
+
+        # Default: assume target is index 0 (old behavior)
+        if target_indices is None:
+            target_indices = list(range(self.n_outputs))
 
         predictions      = []
         current_sequence = np.copy(last_sequence)
 
         for _ in range(n_months):
-            batch_input = current_sequence[np.newaxis, :, :]          # (1, seq_len, n_features)
+            batch_input = current_sequence[np.newaxis, :, :]
             pred        = self.model.predict(batch_input, verbose=0)[0]  # (n_outputs,)
             predictions.append(pred)
 
-            # Build next row: copy last known features, then overwrite
-            # feature[0] (the target / cases column) with the prediction.
-            # Lag features shift forward so the window stays internally consistent:
-            #   index 0 = cases_t  → new prediction
-            #   index 1 = lag_1    → current prediction (becomes previous cases next step)
-            #   index 2 = lag_2    → previous cases (old lag_1 value)
-            new_row    = np.copy(current_sequence[-1])
-            new_row[0] = pred[0]                          # cases ← new prediction
+            new_row = np.copy(current_sequence[-1])
 
-            # ✅ FIXED: lag features shift properly
-            if self.n_features >= 2:
-                new_row[1] = pred[0]                      # lag_1 ← current prediction
-            if self.n_features >= 3:
-                new_row[2] = current_sequence[-1][0]      # lag_2 ← previous cases
+            # ── Update each target feature and its associated lag/rolling cols ──
+            for out_idx, feat_idx in enumerate(target_indices):
+                pred_val = pred[out_idx]
+
+                # 1. Update the target column itself
+                new_row[feat_idx] = pred_val
+
+                # 2. Update lag and rolling columns if feature_cols is provided
+                if feature_cols is not None:
+                    target_col = feature_cols[feat_idx]
+
+                    # Find lag1 col for this target
+                    lag1_col = f"{target_col}_lag1"
+                    if lag1_col in feature_cols:
+                        lag1_idx = feature_cols.index(lag1_col)
+                        new_row[lag1_idx] = pred_val  # lag1 ← current prediction
+
+                    # Find lag2 col for this target
+                    lag2_col = f"{target_col}_lag2"
+                    if lag2_col in feature_cols:
+                        lag2_idx = feature_cols.index(lag2_col)
+                        # lag2 ← what was lag1 in the previous step
+                        if lag1_col in feature_cols:
+                            old_lag1_idx = feature_cols.index(lag1_col)
+                            new_row[lag2_idx] = current_sequence[-1][old_lag1_idx]
+                        else:
+                            new_row[lag2_idx] = current_sequence[-1][feat_idx]
+
+                    # Find rolling3 col for this target
+                    roll3_col = f"{target_col}_roll3"
+                    if roll3_col in feature_cols:
+                        roll3_idx = feature_cols.index(roll3_col)
+                        # rolling3 ← average of last 2 actuals + current prediction
+                        prev_vals = current_sequence[-2:, feat_idx]
+                        new_row[roll3_idx] = (prev_vals.sum() + pred_val) / 3.0
+
+                else:
+                    # Fallback: old behavior assuming layout [target, lag1, lag2]
+                    if self.n_features >= 2:
+                        new_row[feat_idx + 1] = pred_val
+                    if self.n_features >= 3:
+                        new_row[feat_idx + 2] = current_sequence[-1][feat_idx]
+
+            # ── Advance month_sin and month_cos by 1 month ───────────────────
+            if feature_cols is not None and 'month_sin' in feature_cols and 'month_cos' in feature_cols:
+                sin_idx = feature_cols.index('month_sin')
+                cos_idx = feature_cols.index('month_cos')
+                current_angle = np.arctan2(current_sequence[-1][sin_idx],
+                                           current_sequence[-1][cos_idx])
+                next_angle    = current_angle + (2 * np.pi / 12)
+                new_row[sin_idx] = np.sin(next_angle)
+                new_row[cos_idx] = np.cos(next_angle)
 
             current_sequence = np.vstack([
                 current_sequence[1:],
@@ -183,18 +230,35 @@ class SimpleLSTM(LSTMForecaster):
 # ============================================================================
 
 if __name__ == '__main__':
-    print("🧪 Testing LSTMForecaster...")
+    print("🧪 Testing LSTMForecaster with realistic feature layout...")
 
-    X_train = np.random.randn(100, 6, 3)
+    # Simulate: [temperature, rainfall, humidity, month_sin, month_cos,
+    #            cases_lag1, cases_lag2, cases_roll3, cases]
+    n_features   = 9
+    target_index = 8
+    feature_cols = [
+        'temperature', 'rainfall', 'humidity',
+        'month_sin', 'month_cos',
+        'dengue_cases_lag1', 'dengue_cases_lag2', 'dengue_cases_roll3',
+        'dengue_cases',
+    ]
+
+    X_train = np.random.randn(100, 6, n_features)
     y_train = np.random.randn(100, 1)
 
-    forecaster = LSTMForecaster(sequence_length=6, n_features=3, n_outputs=1)
+    forecaster = LSTMForecaster(sequence_length=6, n_features=n_features, n_outputs=1)
     forecaster.build_model()
     forecaster.train(X_train, y_train, epochs=10, patience=3, verbose=0)
 
     last_seq    = X_train[-1]
-    predictions = forecaster.forecast(last_seq, n_months=6)
+    predictions = forecaster.forecast(
+        last_seq,
+        n_months=12,
+        target_indices=[target_index],
+        feature_cols=feature_cols,
+    )
 
     print(f"✅ Test successful!")
     print(f"   Predictions shape:  {predictions.shape}")
-    print(f"   Sample predictions: {predictions[:3].flatten()}")
+    print(f"   Sample predictions: {predictions[:6].flatten().round(4)}")
+    print(f"   All same? {np.allclose(predictions[0], predictions[1])} ← should be False")

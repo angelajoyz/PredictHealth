@@ -375,8 +375,12 @@ def run_lstm_for_barangay(barangay, city, target_diseases, forecast_months,
             processor = DataProcessor(sequence_length=app.config['SEQUENCE_LENGTH'])
             processor.scalers = cached['scalers']
 
-            predictions_scaled   = cached['forecaster'].forecast(
-                cached['last_sequence'], n_months=actual_forecast_months
+            # PATCH PLACE 1: pass target_indices and feature_cols
+            predictions_scaled = cached['forecaster'].forecast(
+                cached['last_sequence'],
+                n_months=actual_forecast_months,
+                target_indices=cached['target_indices'],
+                feature_cols=cached['feature_cols'],
             )
             predictions_original = processor.inverse_transform_predictions(
                 predictions_scaled, diseases
@@ -407,19 +411,26 @@ def run_lstm_for_barangay(barangay, city, target_diseases, forecast_months,
             )
             forecaster.load_model(model_path)
 
+            # PATCH PLACE 5 (memory cache populated from disk): include feature_cols + target_indices
             _model_memory_cache[cache_key] = {
                 'forecaster':      forecaster,
                 'scalers':         meta['scalers'],
                 'last_sequence':   meta['last_sequence'],
                 'last_date':       meta['last_date'],
                 'historical_dict': meta['historical_dict'],
+                'feature_cols':    meta['feature_cols'],
+                'target_indices':  meta['target_indices'],
             }
 
             processor = DataProcessor(sequence_length=app.config['SEQUENCE_LENGTH'])
             processor.scalers = meta['scalers']
 
-            predictions_scaled   = forecaster.forecast(
-                meta['last_sequence'], n_months=actual_forecast_months
+            # PATCH PLACE 2: pass target_indices and feature_cols
+            predictions_scaled = forecaster.forecast(
+                meta['last_sequence'],
+                n_months=actual_forecast_months,
+                target_indices=meta['target_indices'],
+                feature_cols=meta['feature_cols'],
             )
             predictions_original = processor.inverse_transform_predictions(
                 predictions_scaled, diseases
@@ -470,8 +481,15 @@ def run_lstm_for_barangay(barangay, city, target_diseases, forecast_months,
         patience=15
     )
 
-    last_sequence        = scaled_data.values[-app.config['SEQUENCE_LENGTH']:]
-    predictions_scaled   = forecaster.forecast(last_sequence, n_months=actual_forecast_months)
+    last_sequence      = scaled_data.values[-app.config['SEQUENCE_LENGTH']:]
+
+    # PATCH PLACE 3: pass target_indices and feature_cols
+    predictions_scaled = forecaster.forecast(
+        last_sequence,
+        n_months=actual_forecast_months,
+        target_indices=target_indices,
+        feature_cols=feature_cols,
+    )
     predictions_original = processor.inverse_transform_predictions(predictions_scaled, diseases)
 
     last_date      = df_filtered['date'].max()
@@ -483,7 +501,7 @@ def run_lstm_for_barangay(barangay, city, target_diseases, forecast_months,
         **{d: clean_floats(df_filtered[d].fillna(0).tolist()) for d in diseases}
     }
 
-    # Save to disk cache
+    # PATCH PLACE 4: save target_indices to disk cache
     try:
         forecaster.save_model(model_path)
         with open(meta_path, 'wb') as f:
@@ -494,17 +512,21 @@ def run_lstm_for_barangay(barangay, city, target_diseases, forecast_months,
                 'last_date':       last_date,
                 'historical_dict': historical_dict,
                 'feature_cols':    feature_cols,
+                'target_indices':  target_indices,
             }, f)
         print(f"   💾 Model cached to disk for {barangay}")
     except Exception as e:
         print(f"   ⚠️  Failed to cache model to disk: {e}")
 
+    # PATCH PLACE 5: save feature_cols + target_indices to memory cache
     _model_memory_cache[cache_key] = {
         'forecaster':      forecaster,
         'scalers':         processor.scalers,
         'last_sequence':   last_sequence,
         'last_date':       last_date,
         'historical_dict': historical_dict,
+        'feature_cols':    feature_cols,
+        'target_indices':  target_indices,
     }
     print(f"   🧠 Model promoted to memory cache for {barangay}")
 
