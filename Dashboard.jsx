@@ -168,24 +168,27 @@ const TrendRowIcon = ({ type }) => {
   );
 };
 
+// ── ✅ UPDATED: Allow re-selecting "Done" barangays for regeneration ───────────
 const BarangaySelectDialog = ({
   open, allBarangays, forecastedBarangays = [], forecastMonths, referenceDate, onConfirm, onCancel,
 }) => {
   const [selected, setSelected] = useState([]);
   const decYear    = referenceDate ? referenceDate.getFullYear() : new Date().getFullYear();
   const startLabel = referenceDate ? referenceDate.toLocaleDateString('en-PH', { month: 'long' }) : '—';
-  const selectableBarangays = allBarangays.filter(b => !forecastedBarangays.includes(b));
   const lockedCount = forecastedBarangays.length;
-  const allDone = selectableBarangays.length === 0;
+
   useEffect(() => { if (open) setSelected([]); }, [open]);
+
+  // ✅ FIX: Removed check that prevented selecting forecasted barangays
   const toggle = (brgy) => {
-    if (forecastedBarangays.includes(brgy)) return;
     setSelected(prev =>
       prev.includes(brgy) ? prev.filter(b => b !== brgy)
         : prev.length < MAX_BARANGAY_SELECTION ? [...prev, brgy] : prev
     );
   };
+
   const atLimit = selected.length >= MAX_BARANGAY_SELECTION;
+
   return (
     <Dialog open={open} onClose={onCancel} maxWidth="sm" fullWidth
       PaperProps={{ sx: { borderRadius: '14px', border: `1px solid ${T.border}` } }}>
@@ -210,18 +213,12 @@ const BarangaySelectDialog = ({
           <InfoOutlinedIcon sx={{ fontSize: 14, color: T.blue, flexShrink: 0, mt: '1px' }} />
           <Typography sx={{ fontSize: 12, color: T.textBody }}>
             Select <strong>up to {MAX_BARANGAY_SELECTION} barangays</strong> to generate {decYear} forecasts.
+            {lockedCount > 0 && (
+              <> Barangays marked <strong>Done</strong> can be re-selected to regenerate.</>
+            )}
           </Typography>
         </Box>
-        {allDone && (
-          <Box sx={{ p: '10px 14px', mb: 2, borderRadius: '8px', backgroundColor: T.okBg, border: `1px solid ${T.okBorder}` }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <CheckCircleIcon sx={{ fontSize: 15, color: T.ok }} />
-              <Typography sx={{ fontSize: 12.5, fontWeight: 600, color: T.ok }}>
-                All {lockedCount} barangays already have {decYear} forecasts.
-              </Typography>
-            </Box>
-          </Box>
-        )}
+
         {selected.length > 0 && (
           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75, mb: 1.5 }}>
             {selected.map(b => (
@@ -232,6 +229,7 @@ const BarangaySelectDialog = ({
             ))}
           </Box>
         )}
+
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
           <Typography sx={{ fontSize: 11.5, fontWeight: 600, color: T.textFaint, textTransform: 'uppercase', letterSpacing: '0.4px' }}>
             All Barangays ({allBarangays.length})
@@ -245,34 +243,44 @@ const BarangaySelectDialog = ({
             {selected.length} / {MAX_BARANGAY_SELECTION} selected
           </Typography>
         </Box>
+
         <Box sx={{ maxHeight: 280, overflowY: 'auto', border: `1px solid ${T.border}`, borderRadius: '8px', backgroundColor: '#FAFBFC' }}>
           {allBarangays.map((brgy, idx) => {
             const isForecasted = forecastedBarangays.includes(brgy);
             const isChecked    = selected.includes(brgy);
-            const isLocked     = isForecasted || (atLimit && !isChecked);
+            // ✅ FIX: isLocked only when at limit AND not already checked — NOT when forecasted
+            const isLocked     = atLimit && !isChecked;
             return (
               <Box key={brgy} onClick={() => !isLocked && toggle(brgy)}
                 sx={{
                   display: 'flex', alignItems: 'center', gap: 1.25, px: 2, py: 1.1,
                   borderBottom: idx < allBarangays.length - 1 ? `1px solid ${T.borderSoft}` : 'none',
                   cursor: isLocked ? 'not-allowed' : 'pointer',
-                  backgroundColor: isForecasted ? '#F8FFF8' : isChecked ? T.blueDim : 'transparent',
-                  opacity: isForecasted ? 0.7 : atLimit && !isChecked ? 0.45 : 1,
+                  backgroundColor: isChecked ? T.blueDim : isForecasted ? '#F8FFF8' : 'transparent',
+                  opacity: atLimit && !isChecked ? 0.45 : 1,
                   transition: 'background 0.12s',
                   '&:hover': (!isLocked) ? { backgroundColor: isChecked ? T.blueDim : T.pageBg } : {},
                 }}>
-                {isForecasted ? (
-                  <CheckCircleIcon sx={{ fontSize: 18, color: T.ok, flexShrink: 0 }} />
-                ) : (
-                  <Checkbox checked={isChecked} size="small" disabled={isLocked}
-                    sx={{ p: 0, color: T.border, '&.Mui-checked': { color: T.blue } }} />
-                )}
-                <Typography sx={{ fontSize: 13, color: isForecasted ? T.ok : isLocked ? T.textFaint : T.textBody, fontWeight: isForecasted ? 600 : isChecked ? 600 : 400, flex: 1 }}>
+                <Checkbox checked={isChecked} size="small" disabled={isLocked}
+                  sx={{ p: 0, color: T.border, '&.Mui-checked': { color: T.blue } }} />
+                <Typography sx={{
+                  fontSize: 13,
+                  color: isChecked ? T.blue : isForecasted ? T.ok : isLocked ? T.textFaint : T.textBody,
+                  fontWeight: isChecked ? 600 : isForecasted ? 500 : 400,
+                  flex: 1,
+                }}>
                   {brgy}
                 </Typography>
-                {isForecasted && (
+                {/* ✅ Show Done badge but still allow selection */}
+                {isForecasted && !isChecked && (
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.4, px: '8px', py: '2px', borderRadius: '20px', backgroundColor: T.okBg, border: `1px solid ${T.okBorder}`, flexShrink: 0 }}>
                     <Typography sx={{ fontSize: 10.5, color: T.ok, fontWeight: 600 }}>Done</Typography>
+                  </Box>
+                )}
+                {/* ✅ Show Regenerate badge when Done barangay is selected */}
+                {isForecasted && isChecked && (
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.4, px: '8px', py: '2px', borderRadius: '20px', backgroundColor: T.blueDim, border: `1px solid rgba(37,99,235,0.25)`, flexShrink: 0 }}>
+                    <Typography sx={{ fontSize: 10.5, color: T.blue, fontWeight: 600 }}>Regenerate</Typography>
                   </Box>
                 )}
                 {!isForecasted && atLimit && !isChecked && (
@@ -282,6 +290,7 @@ const BarangaySelectDialog = ({
             );
           })}
         </Box>
+
         {atLimit && (
           <Box sx={{ mt: 1.25, p: '8px 12px', borderRadius: '7px', backgroundColor: '#FFF7ED', border: '1px solid #FED7AA' }}>
             <Typography sx={{ fontSize: 11.5, color: '#C2410C' }}>
@@ -295,10 +304,10 @@ const BarangaySelectDialog = ({
           Cancel
         </Button>
         <Button onClick={() => onConfirm(selected)} variant="contained"
-          disabled={selected.length === 0 || allDone}
+          disabled={selected.length === 0}
           startIcon={<PsychologyIcon sx={{ fontSize: 15 }} />}
           sx={{ textTransform: 'none', fontSize: 13, fontWeight: 600, backgroundColor: T.blue, borderRadius: '8px', px: 2.5, '&:hover': { backgroundColor: T.blueMid }, '&:disabled': { opacity: 0.45 } }}>
-          {allDone ? `All ${decYear} forecasts done` : `Generate for ${selected.length > 0 ? `${selected.length} Barangay${selected.length > 1 ? 's' : ''}` : '…'}`}
+          {`Generate for ${selected.length > 0 ? `${selected.length} Barangay${selected.length > 1 ? 's' : ''}` : '…'}`}
         </Button>
       </DialogActions>
     </Dialog>
@@ -566,8 +575,6 @@ const Dashboard = ({ onNavigate, onLogout, isPublic = false }) => {
   const pendingNavRef   = useRef(null);
   const isGeneratingRef = useRef(false);
 
-  // ── FIX: Track generation state in a ref so useEffect can read it without
-  // being added as a dependency (which would cause infinite loops).
   const forecastLoadingRef = useRef(false);
 
   const cityLabel = localStorage.getItem('datasetCity') || '';
@@ -584,7 +591,6 @@ const Dashboard = ({ onNavigate, onLogout, isPublic = false }) => {
 
   const isViewingHistoricalYear = selectedForecastYear !== null && selectedForecastYear < forecastYear;
 
-  // ── FIX: Keep both refs in sync with state ───────────────────────────────────
   useEffect(() => {
     isGeneratingRef.current = forecastLoading;
     forecastLoadingRef.current = forecastLoading;
@@ -620,7 +626,6 @@ const Dashboard = ({ onNavigate, onLogout, isPublic = false }) => {
     onLogout?.();
   };
 
-  // ── Initial data fetch ────────────────────────────────────────────────────────
   useEffect(() => {
     setDatasetReadiness(checkDatasetReadyForForecast());
 
@@ -736,17 +741,10 @@ const Dashboard = ({ onNavigate, onLogout, isPublic = false }) => {
   useEffect(() => { if (selectedBarangay) localStorage.setItem('cachedForecastBarangay', selectedBarangay); }, [selectedBarangay]);
   useEffect(() => { localStorage.setItem('cachedForecastDisease', selectedDisease); }, [selectedDisease]);
 
-  // ── FIX: Guard this useEffect so it never fires while generation is in progress.
-  // The ref (forecastLoadingRef) is used instead of the state variable so we don't
-  // need to add forecastLoading as a dependency, which would cause extra fetches.
   useEffect(() => {
     if (selectedForecastYear === null) return;
     if (!isPublic && !hasDbData) return;
     if (forecastLoading) return;
-
-    // ── KEY FIX: Never fetch forecast-saved while a generation is running.
-    // This prevents the 429 "another forecast is already running" error caused
-    // by this useEffect firing mid-generation when state changes trigger re-renders.
     if (forecastLoadingRef.current) return;
 
     const isHistorical = selectedForecastYear < forecastYear;
@@ -889,7 +887,6 @@ const Dashboard = ({ onNavigate, onLogout, isPublic = false }) => {
     if (selectedBrgy.length > 0) runGenerate(selectedBrgy);
   };
 
-  // ── FIX: Retry helper for 429 responses ──────────────────────────────────────
   const fetchWithRetry = async (url, options, retries = 3, delayMs = 4000) => {
     for (let attempt = 0; attempt < retries; attempt++) {
       const res = await fetch(url, options);
@@ -899,125 +896,116 @@ const Dashboard = ({ onNavigate, onLogout, isPublic = false }) => {
         await new Promise(r => setTimeout(r, delayMs));
       }
     }
-    // Return the last 429 response so caller can handle it
     return await fetch(url, options);
   };
 
-const runGenerate = async (barangaysToGenerate) => {
-  setForecastLoading(true);
-  forecastLoadingRef.current = true;
-  setForecastError('');
-  const total = barangaysToGenerate.length;
+  const runGenerate = async (barangaysToGenerate) => {
+    setForecastLoading(true);
+    forecastLoadingRef.current = true;
+    setForecastError('');
+    const total = barangaysToGenerate.length;
 
-  setGenOverlay({
-    visible: true,
-    progress: 0,
-    total,
-    current: `Preparing ${total} barangay${total > 1 ? 's' : ''}…`,
-    completed: [],
-    failed: [],
-  });
-
-  try {
-    const city  = localStorage.getItem('datasetCity') || '';
-    const token = localStorage.getItem('token');
-
-    // ✅ Single batch request — backend handles the loop
-    // Simulate progress while waiting (backend doesn't stream yet)
-    let fakeProgress = 0;
-const progressInterval = setInterval(() => {
-      fakeProgress = Math.min(fakeProgress + 1, total - 1);
-      const fakeCurrent = barangaysToGenerate[fakeProgress] || barangaysToGenerate[total - 1];
-      setGenOverlay(prev => {
-        // ✅ Huwag mag-update kung tapos na ang request
-        if (prev.progress >= prev.total) return prev;
-        return {
-          ...prev,
-          progress: fakeProgress,
-          current: fakeCurrent,
-        };
-      });
-    }, 8000);
-
-    const res = await fetch(`${API_BASE_URL}/forecast-all`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        forecast_months: forecastMonths,
-        city,
-        diseases: availableDiseases,
-        barangays: barangaysToGenerate,
-        forecast_year: forecastYear, 
-      }),
+    setGenOverlay({
+      visible: true,
+      progress: 0,
+      total,
+      current: `Preparing ${total} barangay${total > 1 ? 's' : ''}…`,
+      completed: [],
+      failed: [],
     });
 
-    clearInterval(progressInterval);
+    try {
+      const city  = localStorage.getItem('datasetCity') || '';
+      const token = localStorage.getItem('token');
 
-    const result = await res.json();
-    if (!res.ok) throw new Error(result.error || `HTTP ${res.status}`);
+      let fakeProgress = 0;
+      const progressInterval = setInterval(() => {
+        fakeProgress = Math.min(fakeProgress + 1, total - 1);
+        const fakeCurrent = barangaysToGenerate[fakeProgress] || barangaysToGenerate[total - 1];
+        setGenOverlay(prev => {
+          if (prev.progress >= prev.total) return prev;
+          return { ...prev, progress: fakeProgress, current: fakeCurrent };
+        });
+      }, 8000);
 
-    const completedList = (result.results || []).map(r => r.barangay);
-    const failedList    = (result.failed_details || []).map(r => r.barangay);
+      const res = await fetch(`${API_BASE_URL}/forecast-all`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          forecast_months: forecastMonths,
+          city,
+          diseases: availableDiseases,
+          barangays: barangaysToGenerate,
+          forecast_year: forecastYear,
+        }),
+      });
 
-    // ✅ Show final state
-    setGenOverlay(prev => ({
-      ...prev,
-      progress: total,
-      current: null,
-      completed: completedList,
-      failed: failedList,
-    }));
+      clearInterval(progressInterval);
 
-    setHasSavedForecasts(true);
-    setHasNewUpload(false);
-    localStorage.setItem('lastForecastGeneratedAt', new Date().toISOString());
-    setGenerateAllProgress({ completed: completedList.length, total });
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error || `HTTP ${res.status}`);
 
-    if (completedList.length > 0) {
-      setForecastedBarangays(prev => Array.from(new Set([...prev, ...completedList])));
-    }
-    if (failedList.length > 0) {
-      setForecastError(`Done! ${completedList.length}/${total} barangays completed. ${failedList.length} failed.`);
-    }
+      const completedList = (result.results || []).map(r => r.barangay);
+      const failedList    = (result.failed_details || []).map(r => r.barangay);
 
-  } catch (err) {
-    setForecastError(err.message || 'Generate failed. Please try again.');
-  } finally {
-    setForecastLoading(false);
-    forecastLoadingRef.current = false;
-    setGenOverlay(prev => ({ ...prev, current: null }));
-    setAvailableForecastYears(prev =>
-      Array.from(new Set([forecastYear, ...prev])).sort((a, b) => b - a)
-    );
+      setGenOverlay(prev => ({
+        ...prev,
+        progress: total,
+        current: null,
+        completed: completedList,
+        failed: failedList,
+      }));
 
-setTimeout(async () => {
-      try {
-        const token = localStorage.getItem('token');
-        const city  = localStorage.getItem('datasetCity') || '';
-        const saved = await fetch(
-          `${API_BASE_URL}/forecast-saved?barangay=${encodeURIComponent(ALL_BARANGAYS)}&city=${encodeURIComponent(city)}`,
-          { headers: { 'Authorization': `Bearer ${token}` } }
-        ).then(r => r.json()).catch(() => null);
-        if (saved && !saved.not_found) {
-          setForecastData(saved);
-          setForecastIsValid(isForecastValid(saved.forecast_dates));
-          setSelectedBarangay(ALL_BARANGAYS);
-        }
-        setSelectedForecastYear(forecastYear); // ✅ pagkatapos ng fetch
-      } catch (e) {
-        setSelectedForecastYear(forecastYear); // ✅ kahit mag-error
+      setHasSavedForecasts(true);
+      setHasNewUpload(false);
+      localStorage.setItem('lastForecastGeneratedAt', new Date().toISOString());
+      setGenerateAllProgress({ completed: completedList.length, total });
+
+      if (completedList.length > 0) {
+        setForecastedBarangays(prev => Array.from(new Set([...prev, ...completedList])));
       }
-    }, 800);
+      if (failedList.length > 0) {
+        setForecastError(`Done! ${completedList.length}/${total} barangays completed. ${failedList.length} failed.`);
+      }
 
-    setTimeout(() => {
-      setGenOverlay(prev => ({ ...prev, visible: false }));
-      setTimeout(() => setGenerateAllProgress(null), 4000);
-    }, 1500);
-  }
-};
+    } catch (err) {
+      setForecastError(err.message || 'Generate failed. Please try again.');
+    } finally {
+      setForecastLoading(false);
+      forecastLoadingRef.current = false;
+      setGenOverlay(prev => ({ ...prev, current: null }));
+      setAvailableForecastYears(prev =>
+        Array.from(new Set([forecastYear, ...prev])).sort((a, b) => b - a)
+      );
+
+      setTimeout(async () => {
+        try {
+          const token = localStorage.getItem('token');
+          const city  = localStorage.getItem('datasetCity') || '';
+          const saved = await fetch(
+            `${API_BASE_URL}/forecast-saved?barangay=${encodeURIComponent(ALL_BARANGAYS)}&city=${encodeURIComponent(city)}`,
+            { headers: { 'Authorization': `Bearer ${token}` } }
+          ).then(r => r.json()).catch(() => null);
+          if (saved && !saved.not_found) {
+            setForecastData(saved);
+            setForecastIsValid(isForecastValid(saved.forecast_dates));
+            setSelectedBarangay(ALL_BARANGAYS);
+          }
+          setSelectedForecastYear(forecastYear);
+        } catch (e) {
+          setSelectedForecastYear(forecastYear);
+        }
+      }, 800);
+
+      setTimeout(() => {
+        setGenOverlay(prev => ({ ...prev, visible: false }));
+        setTimeout(() => setGenerateAllProgress(null), 4000);
+      }, 1500);
+    }
+  };
 
   const stats      = getSummaryStats();
   const chartData  = buildChartData();
@@ -1098,7 +1086,6 @@ setTimeout(async () => {
             />
           )}
 
-          {/* Controls */}
           <SCard sx={{ mb: '14px' }}>
             <CardContent sx={{ p: '14px 16px', '&:last-child': { pb: '14px' } }}>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
@@ -1176,7 +1163,6 @@ setTimeout(async () => {
             </Box>
           )}
 
-          {/* Stat cards */}
           <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px', mb: '14px' }}>
             <SCard sx={{ borderTop: `3px solid ${T.blue}` }}>
               <CardContent sx={{ p: '16px', '&:last-child': { pb: '16px' } }}>
@@ -1222,7 +1208,6 @@ setTimeout(async () => {
             </SCard>
           </Box>
 
-          {/* Chart */}
           <SCard sx={{ mb: '14px' }}>
             <CardContent sx={{ p: '18px 20px 14px', '&:last-child': { pb: '14px' } }}>
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2, gap: 1, flexWrap: 'wrap' }}>
@@ -1273,7 +1258,6 @@ setTimeout(async () => {
             </CardContent>
           </SCard>
 
-          {/* Results */}
           <SCard>
             <CardContent sx={{ p: '18px 20px', '&:last-child': { pb: '20px' } }}>
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1.75 }}>
