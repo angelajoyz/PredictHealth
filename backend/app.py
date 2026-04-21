@@ -1439,17 +1439,17 @@ def delete_upload_history(upload_id):
         if upload.user_id != current_user.id and current_user.role != 'admin':
             return jsonify({'error': 'Access denied'}), 403
 
-        BarangayData.query.filter_by(upload_id=upload_id).delete()
+        # ✅ I-delete ang actual data na galing sa file na ito
+        deleted_count = BarangayData.query.filter_by(upload_id=upload_id).delete()
+        print(f"   🗑️ Deleted {deleted_count} BarangayData records for upload {upload_id}")
 
-        forecasts = Forecast.query.filter_by(user_id=upload.user_id).all()
-        for f in forecasts:
-            ForecastResult.query.filter_by(forecast_id=f.id).delete()
-            db.session.delete(f)
+        # ✅ Forecasts ay hindi ide-delete — computed results sila,
+        #    hindi direktang galing sa uploaded file
 
         db.session.delete(upload)
         db.session.commit()
 
-        return jsonify({'message': 'Upload deleted successfully'}), 200
+        return jsonify({'message': 'Upload and associated data deleted successfully'}), 200
 
     except Exception as e:
         db.session.rollback()

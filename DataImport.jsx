@@ -28,6 +28,7 @@ import {
   SwapHoriz as SwapIcon,
   LocationCity as CityIcon,
   DeleteForever as DeleteIcon,
+  BlockOutlined as BlockIcon,
 } from "@mui/icons-material";
 import Sidebar, { T } from "./Sidebar";
 import { getBarangays, scanFile, checkFilename } from "./services/api";
@@ -73,6 +74,8 @@ const CardHead = ({ title, icon }) => (
 const MAX_FILE_SIZE_MB = 10;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 
+const ALLOWED_EXTENSIONS = [".csv", ".xlsx", ".xls"];
+
 const VALID_FILE_TYPES = {
   ".csv": [
     "text/csv",
@@ -87,12 +90,61 @@ const VALID_FILE_TYPES = {
   ".xls": ["application/vnd.ms-excel", "application/octet-stream"],
 };
 
+/**
+ * Returns { valid: boolean, ext: string, reason: string | null }
+ * Checks extension first — if not in allowed list, immediately invalid
+ * regardless of MIME type (covers .pdf, .png, .docx, .txt, etc.)
+ */
 const validateFileType = (file) => {
-  const ext = file.name.substring(file.name.lastIndexOf(".")).toLowerCase();
-  if (!Object.keys(VALID_FILE_TYPES).includes(ext)) return false;
+  const lastDot = file.name.lastIndexOf(".");
+  const ext = lastDot !== -1 ? file.name.substring(lastDot).toLowerCase() : "";
+
+  // No extension or not in allowed list → reject immediately
+  if (!ext || !ALLOWED_EXTENSIONS.includes(ext)) {
+    return { valid: false, ext, reason: "invalid_type" };
+  }
+
+  // Extension is allowed — also cross-check MIME type when available
   const allowedMimes = VALID_FILE_TYPES[ext];
-  if (file.type && !allowedMimes.includes(file.type)) return false;
-  return true;
+  if (file.type && file.type !== "" && !allowedMimes.includes(file.type)) {
+    return { valid: false, ext, reason: "mime_mismatch" };
+  }
+
+  return { valid: true, ext, reason: null };
+};
+
+/**
+ * Returns a human-readable rejection message for unsupported file types.
+ */
+const getFileTypeError = (file) => {
+  const lastDot = file.name.lastIndexOf(".");
+  const ext = lastDot !== -1 ? file.name.substring(lastDot).toLowerCase() : "";
+
+  const friendlyNames = {
+    ".pdf":  "PDF",
+    ".doc":  "Word document",
+    ".docx": "Word document",
+    ".png":  "PNG image",
+    ".jpg":  "JPEG image",
+    ".jpeg": "JPEG image",
+    ".gif":  "GIF image",
+    ".bmp":  "BMP image",
+    ".webp": "WebP image",
+    ".svg":  "SVG image",
+    ".txt":  "text file",
+    ".json": "JSON file",
+    ".xml":  "XML file",
+    ".zip":  "ZIP archive",
+    ".rar":  "RAR archive",
+    ".ppt":  "PowerPoint file",
+    ".pptx": "PowerPoint file",
+    ".mp4":  "video file",
+    ".mp3":  "audio file",
+  };
+
+  const typeName = friendlyNames[ext] || (ext ? `${ext} file` : "unsupported file");
+
+  return `${typeName.charAt(0).toUpperCase() + typeName.slice(1)} hindi tinatanggap. Mag-upload lamang ng Excel (.xlsx, .xls) o CSV (.csv) na file.`;
 };
 
 const formatFileSize = (bytes) =>
@@ -528,7 +580,6 @@ const DataImport = ({ onNavigate, onLogout, onDataUploaded }) => {
   // ── Smart detection — uses scanFile (no DB write) ─────────────────────────
   const detectDialogType = async (file) => {
     try {
-      // scanFile only parses the file — never writes to DB
       const response = await scanFile(file);
       const newBarangays = response.barangays || [];
       const newDiseases = response.disease_columns || [];
@@ -560,15 +611,22 @@ const DataImport = ({ onNavigate, onLogout, onDataUploaded }) => {
   };
 
   // ── trySelectFile ─────────────────────────────────────────────────────────
-  // Cross-account check hits the DB via /api/check-filename (not localStorage).
-  // All scan calls use scanFile() which never writes to DB.
-  // DB write only happens in handleSaveAndContinue via getBarangays().
+  // ✅ File type is validated FIRST — before any API call is made.
   const trySelectFile = async (file) => {
+    // ── 0. Validate file type immediately — before anything else ─────────
+    const { valid } = validateFileType(file);
+    if (!valid) {
+      setSelectedFile(file);
+      setValidationStatus("error");
+      setValidationErrors([getFileTypeError(file)]);
+      return;
+    }
+
     setSelectedFile(file);
     setValidationStatus("loading");
     cancelledRef.current = false;
 
-    // ── 1. Cross-account + same-account check via DB (runs FIRST) ────────
+    // ── 1. Cross-account + same-account check via DB ──────────────────────
     try {
       const check = await checkFilename(file.name);
       if (cancelledRef.current) return;
@@ -609,7 +667,6 @@ const DataImport = ({ onNavigate, onLogout, onDataUploaded }) => {
         }
       });
     } else {
-      // Fresh upload — scan only (no DB write yet)
       handleFileSelection(file);
     }
   };
@@ -702,7 +759,6 @@ const DataImport = ({ onNavigate, onLogout, onDataUploaded }) => {
     setValidationErrors([]);
     setRowCount(null);
     setDatasetCity(null);
-    // Scan only — no DB write yet
     handleFileSelection(file);
   };
 
@@ -734,7 +790,6 @@ const DataImport = ({ onNavigate, onLogout, onDataUploaded }) => {
   };
 
   // ── Apply a previously scanned response to UI state ───────────────────────
-  // Does NOT write to DB — only updates localStorage preview keys and UI.
   const applyScannedResponse = (file, response) => {
     setSelectedFile(file);
     const receivedBarangays = response.barangays || [];
@@ -743,7 +798,6 @@ const DataImport = ({ onNavigate, onLogout, onDataUploaded }) => {
     setDiseaseColumns(receivedDiseases);
     if (response.row_count != null) setRowCount(response.row_count);
     if (response.city) setDatasetCity(response.city);
-    // Store preview info in localStorage (not the actual data upload)
     if (receivedBarangays.length > 0)
       localStorage.setItem(
         "availableBarangays",
@@ -760,15 +814,9 @@ const DataImport = ({ onNavigate, onLogout, onDataUploaded }) => {
   };
 
   // ── handleFileSelection — uses scanFile (no DB write) ────────────────────
+  // NOTE: File type is already validated in trySelectFile before this is called.
+  // Size check is still done here as a secondary gate.
   const handleFileSelection = async (file) => {
-    if (!validateFileType(file)) {
-      setSelectedFile(file);
-      setValidationStatus("error");
-      setValidationErrors([
-        `"${file.name}" is not a supported file type. Please upload .xlsx, .xls, or .csv only.`,
-      ]);
-      return;
-    }
     if (file.size > MAX_FILE_SIZE_BYTES) {
       setSelectedFile(file);
       setValidationStatus("error");
@@ -784,7 +832,6 @@ const DataImport = ({ onNavigate, onLogout, onDataUploaded }) => {
     setRowCount(null);
     setDatasetCity(null);
     try {
-      // scanFile → no DB writes, just parse + return metadata
       const [response] = await Promise.all([
         scanFile(file),
         new Promise((r) => setTimeout(r, 4500)),
@@ -796,7 +843,6 @@ const DataImport = ({ onNavigate, onLogout, onDataUploaded }) => {
       setDiseaseColumns(receivedDiseases);
       if (response.row_count != null) setRowCount(response.row_count);
       if (response.city) setDatasetCity(response.city);
-      // Preview keys only — actual save deferred to Step 3
       if (receivedBarangays.length > 0)
         localStorage.setItem(
           "availableBarangays",
@@ -835,7 +881,6 @@ const DataImport = ({ onNavigate, onLogout, onDataUploaded }) => {
   const handleSaveAndContinue = async () => {
     try {
       setValidationStatus("saving");
-      // getBarangays → hits /api/barangays → writes UploadHistory + BarangayData to DB
       const response = await getBarangays(selectedFile);
       if (cancelledRef.current) return;
       const now = new Date().toISOString();
@@ -848,7 +893,6 @@ const DataImport = ({ onNavigate, onLogout, onDataUploaded }) => {
           uploadId: response.upload_id,
         }),
       );
-      // Update localStorage with the freshly saved data's metadata
       if (response.barangays?.length > 0)
         localStorage.setItem(
           "availableBarangays",
@@ -991,13 +1035,47 @@ const DataImport = ({ onNavigate, onLogout, onDataUploaded }) => {
                     Drag and drop your file here
                   </Typography>
                   <Typography
-                    sx={{ fontSize: 12, color: T.textMuted, mb: 0.5 }}
+                    sx={{ fontSize: 12, color: T.textMuted, mb: 0.75 }}
                   >
                     or click to browse
                   </Typography>
-                  <Typography sx={{ fontSize: 11, color: T.textFaint }}>
-                    Supported formats: .xlsx, .xls, .csv · Max size:{" "}
-                    {MAX_FILE_SIZE_MB} MB
+                  {/* ── Accepted formats pill ── */}
+                  <Box
+                    sx={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "6px",
+                      mt: 0.25,
+                    }}
+                  >
+                    {[".xlsx", ".xls", ".csv"].map((fmt) => (
+                      <Box
+                        key={fmt}
+                        sx={{
+                          px: "9px",
+                          py: "3px",
+                          borderRadius: "5px",
+                          backgroundColor: T.blueDim,
+                          border: `1px solid rgba(27,79,138,0.2)`,
+                        }}
+                      >
+                        <Typography
+                          sx={{
+                            fontSize: 11,
+                            fontWeight: 600,
+                            color: T.blue,
+                            lineHeight: 1,
+                          }}
+                        >
+                          {fmt}
+                        </Typography>
+                      </Box>
+                    ))}
+                  </Box>
+                  <Typography
+                    sx={{ fontSize: 11, color: T.textFaint, mt: 0.75 }}
+                  >
+                    Excel at CSV files lamang · Max: {MAX_FILE_SIZE_MB} MB
                   </Typography>
                   <input
                     id="file-input"
@@ -1018,12 +1096,21 @@ const DataImport = ({ onNavigate, onLogout, onDataUploaded }) => {
                       p: "10px 14px",
                       borderRadius: "8px",
                       backgroundColor: T.pageBg,
-                      border: `1px solid ${T.borderSoft}`,
+                      border: `1px solid ${
+                        validationStatus === "error"
+                          ? T.dangerBorder
+                          : T.borderSoft
+                      }`,
                       mb: 1.5,
                     }}
                   >
                     <FileIcon
-                      sx={{ fontSize: 20, color: T.blue, flexShrink: 0 }}
+                      sx={{
+                        fontSize: 20,
+                        color:
+                          validationStatus === "error" ? T.danger : T.blue,
+                        flexShrink: 0,
+                      }}
                     />
                     <Box sx={{ flex: 1, minWidth: 0 }}>
                       <Typography
@@ -1042,13 +1129,16 @@ const DataImport = ({ onNavigate, onLogout, onDataUploaded }) => {
                         sx={{
                           fontSize: 11,
                           color:
-                            selectedFile.size > MAX_FILE_SIZE_BYTES * 0.8
+                            validationStatus === "error"
+                              ? T.danger
+                              : selectedFile.size > MAX_FILE_SIZE_BYTES * 0.8
                               ? T.warnAccent
                               : T.textMuted,
                         }}
                       >
                         {formatFileSize(selectedFile.size)}
-                        {selectedFile.size > MAX_FILE_SIZE_BYTES * 0.8 &&
+                        {validationStatus !== "error" &&
+                          selectedFile.size > MAX_FILE_SIZE_BYTES * 0.8 &&
                           selectedFile.size <= MAX_FILE_SIZE_BYTES &&
                           " · near size limit"}
                       </Typography>
@@ -1083,7 +1173,7 @@ const DataImport = ({ onNavigate, onLogout, onDataUploaded }) => {
                   {validationStatus === "error" && (
                     <Box
                       sx={{
-                        p: "10px 14px",
+                        p: "12px 14px",
                         borderRadius: "8px",
                         backgroundColor: T.dangerBg,
                         border: `1px solid ${T.dangerBorder}`,
@@ -1094,28 +1184,73 @@ const DataImport = ({ onNavigate, onLogout, onDataUploaded }) => {
                           display: "flex",
                           alignItems: "center",
                           gap: 1,
-                          mb: 0.5,
+                          mb: 0.75,
                         }}
                       >
                         <ErrorIcon sx={{ fontSize: 15, color: T.danger }} />
                         <Typography
                           sx={{
                             fontSize: 12.5,
-                            fontWeight: 600,
+                            fontWeight: 700,
                             color: T.danger,
                           }}
                         >
-                          Validation Failed
+                          Hindi Tinatanggap na File
                         </Typography>
                       </Box>
                       {validationErrors.map((err, i) => (
                         <Typography
                           key={i}
-                          sx={{ fontSize: 12, color: T.danger, pl: 3 }}
+                          sx={{ fontSize: 12, color: T.danger, pl: 3, mb: 0.5 }}
                         >
-                          • {err}
+                          {err}
                         </Typography>
                       ))}
+                      {/* ── Accepted formats reminder ── */}
+                      <Box
+                        sx={{
+                          mt: 1.25,
+                          pt: 1.25,
+                          borderTop: `1px solid ${T.dangerBorder}`,
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 1,
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        <Typography
+                          sx={{
+                            fontSize: 11.5,
+                            color: T.danger,
+                            fontWeight: 600,
+                          }}
+                        >
+                          Mga tinatanggap:
+                        </Typography>
+                        {[".xlsx", ".xls", ".csv"].map((fmt) => (
+                          <Box
+                            key={fmt}
+                            sx={{
+                              px: "8px",
+                              py: "2px",
+                              borderRadius: "4px",
+                              backgroundColor: "#FEE2E2",
+                              border: `1px solid ${T.dangerBorder}`,
+                            }}
+                          >
+                            <Typography
+                              sx={{
+                                fontSize: 11,
+                                fontWeight: 700,
+                                color: T.danger,
+                                lineHeight: 1,
+                              }}
+                            >
+                              {fmt}
+                            </Typography>
+                          </Box>
+                        ))}
+                      </Box>
                     </Box>
                   )}
 
