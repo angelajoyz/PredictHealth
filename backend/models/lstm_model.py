@@ -19,25 +19,12 @@ class LSTMForecaster:
     """
 
     def __init__(self, sequence_length=6, n_features=3, n_outputs=1):
-        """
-        Initialize LSTM Forecaster.
-
-        Args:
-            sequence_length: Number of past time steps to use as input (lookback)
-            n_features:      Number of features per time step
-            n_outputs:       Number of output variables to forecast
-        """
         self.sequence_length = sequence_length
         self.n_features      = n_features
         self.n_outputs       = n_outputs
         self.model           = None
 
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
-
     def _get_keras(self):
-        """Lazy-load TensorFlow/Keras only when needed."""
         import tensorflow as tf
         from tensorflow.keras.models import Model
         from tensorflow.keras.layers import Input, LSTM, Dense, Dropout
@@ -45,26 +32,7 @@ class LSTMForecaster:
         from tensorflow.keras.optimizers import Adam
         return tf, Model, Input, LSTM, Dense, Dropout, EarlyStopping, Adam
 
-    # ------------------------------------------------------------------
-    # Model construction
-    # ------------------------------------------------------------------
-
     def build_model(self):
-        """
-        Build LSTM model using the Functional API.
-
-        Architecture (optimized for accuracy on small health datasets):
-          - LSTM(64) → captures broad temporal patterns
-          - LSTM(32) → mid-level abstraction
-          - LSTM(16) → compressed representation before dense head
-          - Dense(32) → non-linear projection
-          - Dense(16) → further refinement
-          - Dense(n_outputs) → final forecast
-
-        Uses tanh activation (better for LSTM time series than relu).
-        Uses Huber loss (robust to outliers in health data).
-        Lower learning rate (0.0005) for more precise convergence.
-        """
         tf, Model, Input, LSTM, Dense, Dropout, _, Adam = self._get_keras()
 
         inputs = Input(shape=(self.sequence_length, self.n_features))
@@ -98,24 +66,8 @@ class LSTMForecaster:
 
         return self.model
 
-    # ------------------------------------------------------------------
-    # Training
-    # ------------------------------------------------------------------
-
     def train(self, X, y, epochs=100, batch_size=16,
               validation_split=0.2, patience=15, verbose=0):
-        """
-        Train the LSTM model with early stopping.
-
-        Args:
-            X:                Input sequences (batch, sequence_length, n_features)
-            y:                Target values   (batch, n_outputs)
-            epochs:           Maximum training epochs
-            batch_size:       Batch size
-            validation_split: Fraction of data reserved for validation
-            patience:         Early-stopping patience
-            verbose:          Keras verbosity (0 = silent)
-        """
         if self.model is None:
             self.build_model()
 
@@ -147,22 +99,13 @@ class LSTMForecaster:
 
         return history
 
-    # ------------------------------------------------------------------
-    # Forecasting
-    # ------------------------------------------------------------------
-
     def forecast(self, last_sequence, n_months=6):
         """
-        Generate forecasts for future months using a single batched call.
+        Generate forecasts using autoregressive (rolling) prediction.
 
-        Instead of calling model.predict() n_months times in a loop (one
-        TensorFlow graph execution per step), all input sequences are built
-        upfront and passed to model.predict() in ONE batch.
-
-        Speedup: ~5–6× faster for a 6-month forecast on CPU.
-
-        Sliding-window strategy: each future step advances the window by one
-        timestep using the last known row (stable on CPU-only environments).
+        Each predicted value is fed back into the input window so future
+        steps genuinely depend on prior predictions — preventing the
+        flat/repeating forecast bug caused by reusing the last known row.
 
         Args:
             last_sequence: Last sequence from training data,
@@ -175,45 +118,42 @@ class LSTMForecaster:
         if self.model is None:
             raise ValueError("Model not built. Call build_model() first.")
 
-        sequences        = []
+        predictions      = []
         current_sequence = np.copy(last_sequence)
 
         for _ in range(n_months):
-            sequences.append(current_sequence.copy())
+            batch_input = current_sequence[np.newaxis, :, :]         # (1, seq_len, n_features)
+            pred        = self.model.predict(batch_input, verbose=0)[0]  # (n_outputs,)
+            predictions.append(pred)
+
+            # Build next row: copy last known features, then overwrite
+            # feature[0] (the target / cases column) with the prediction.
+            # If your feature order is [cases, lag_1, lag_2, ...] update
+            # the lag columns too so the window stays internally consistent.
+            new_row    = np.copy(current_sequence[-1])
+            new_row[0] = pred[0]                         # target feature ← predicted value
+
+            # Update lag features if present (assumes feature layout:
+            #   index 0 = cases, index 1 = lag_1, index 2 = lag_2)
+            if self.n_features >= 2:
+                new_row[1] = current_sequence[-1][0]     # lag_1 ← previous cases
+            if self.n_features >= 3:
+                new_row[2] = current_sequence[-2][0]     # lag_2 ← two steps back
+
             current_sequence = np.vstack([
                 current_sequence[1:],
-                current_sequence[-1],
+                new_row[np.newaxis, :],
             ])
 
-        batch_input = np.array(sequences)                         # (n_months, seq_len, n_features)
-        predictions = self.model.predict(batch_input, verbose=0)  # (n_months, n_outputs)
-
-        return predictions
-
-    # ------------------------------------------------------------------
-    # Persistence
-    # ------------------------------------------------------------------
+        return np.array(predictions)   # (n_months, n_outputs)
 
     def save_model(self, filepath):
-        """
-        Save model to disk.
-
-        Args:
-            filepath: Destination path (use .keras extension for best compatibility)
-        """
         if self.model is None:
             raise ValueError("Model not built. Call build_model() first.")
-
         self.model.save(filepath, save_format='keras')
         print(f"💾 Model saved to {filepath}")
 
     def load_model(self, filepath):
-        """
-        Load a pre-trained model from disk.
-
-        Args:
-            filepath: Path to a saved .keras model file
-        """
         tf, *_ = self._get_keras()
         try:
             self.model = tf.keras.models.load_model(filepath)
@@ -221,12 +161,7 @@ class LSTMForecaster:
         except Exception as e:
             raise ValueError(f"Failed to load model: {e}")
 
-    # ------------------------------------------------------------------
-    # Utilities
-    # ------------------------------------------------------------------
-
     def summary(self):
-        """Print model architecture summary."""
         if self.model is None:
             print("❌ Model not built yet. Call build_model() first.")
         else:
@@ -249,14 +184,14 @@ class SimpleLSTM(LSTMForecaster):
 if __name__ == '__main__':
     print("🧪 Testing LSTMForecaster...")
 
-    X_train = np.random.randn(100, 6, 3)  # 100 samples, 6 timesteps, 3 features
-    y_train = np.random.randn(100, 1)     # 100 samples, 1 output
+    X_train = np.random.randn(100, 6, 3)
+    y_train = np.random.randn(100, 1)
 
     forecaster = LSTMForecaster(sequence_length=6, n_features=3, n_outputs=1)
     forecaster.build_model()
     forecaster.train(X_train, y_train, epochs=10, patience=3, verbose=0)
 
-    last_seq    = X_train[-1]                          # (6, 3)
+    last_seq    = X_train[-1]
     predictions = forecaster.forecast(last_seq, n_months=6)
 
     print(f"✅ Test successful!")
