@@ -2050,28 +2050,37 @@ const Prediction = ({ onNavigate, onLogout, isPublic = false }) => {
     if (needsRestore.length === 0) { setIsInitializing(false); return; }
 
     const city = localStorage.getItem('datasetCity') || '';
-    Promise.allSettled(
-      needsRestore.map(brgy => getSavedForecast(brgy, city).then(result => ({ brgy, result })))
-    ).then(results => {
-      const newEntries = [];
-      results.forEach(r => {
-        if (r.status === 'fulfilled' && r.value.result)
-          newEntries.push(...buildHistoryEntries(r.value.result, r.value.brgy, city));
-      });
-      if (newEntries.length > 0) {
-   setForecastHistory(prev => {
-  const newKeys = new Set(
-    newEntries.map(h => `${h.barangay}|${h.period}|${h.disease}`)
-  );
-  const filtered = prev.filter(
-    h => !newKeys.has(`${h.barangay}|${h.period}|${h.disease}`)
-  );
-  const updated = [...filtered, ...newEntries];
-  try { localStorage.setItem('forecastHistory', JSON.stringify(updated)); } catch {}
-  return updated;
-});
-      }
-    }).finally(() => setIsInitializing(false));
+    const yearsToFetch = [
+  String(new Date().getFullYear()),
+  String(new Date().getFullYear() - 1),
+];
+
+Promise.allSettled(
+  needsRestore.flatMap(brgy =>
+    yearsToFetch.map(yr =>
+      getSavedForecast(brgy, city, yr).then(result => ({ brgy, result, yr }))
+    )
+  )
+).then(results => {
+  const newEntries = [];
+  results.forEach(r => {
+    if (r.status === 'fulfilled' && r.value.result)
+      newEntries.push(...buildHistoryEntries(r.value.result, r.value.brgy, city));
+  });
+  if (newEntries.length > 0) {
+    setForecastHistory(prev => {
+      const newKeys = new Set(
+        newEntries.map(h => `${h.barangay}|${h.period}|${h.disease}`)
+      );
+      const filtered = prev.filter(
+        h => !newKeys.has(`${h.barangay}|${h.period}|${h.disease}`)
+      );
+      const updated = [...filtered, ...newEntries];
+      try { localStorage.setItem('forecastHistory', JSON.stringify(updated)); } catch {}
+      return updated;
+    });
+  }
+}).finally(() => setIsInitializing(false));
   }, []);
 
   useEffect(() => { saveConfirmed(confirmedBarangays); }, [confirmedBarangays]);
@@ -2108,30 +2117,48 @@ const handleConfirmBarangays = useCallback(async (selected) => {
   setSelectedYear(null);
   setSelectedMonth(null);
 
+  // Kunin ang available forecast years mula sa existing history
+  const existingYears = [...new Set(
+    forecastHistory.map(h => getPeriodYear(h.period)).filter(Boolean)
+  )];
+
+  // Palaging i-include ang current year + lahat ng existing years
+  const currentYear = String(new Date().getFullYear());
+  const yearsToFetch = [...new Set([...existingYears, currentYear, String(parseInt(currentYear) - 1)])];
+
   for (const brgy of [...selected]) {
     try {
       setLoadingBarangay(brgy);
-      const result = await getSavedForecast(brgy, cityLabel);
-      if (!result) continue;
-      const newEntries = buildHistoryEntries(result, brgy, cityLabel);
 
-      setForecastHistory(prev => {
-        // Only remove entries na exact match ng barangay + period + disease
-        // para hindi ma-wipe ang 2025 data na nandoon na
-        const newKeys = new Set(
-          newEntries.map(h => `${h.barangay}|${h.period}|${h.disease}`)
-        );
-        const filtered = prev.filter(
-          h => !newKeys.has(`${h.barangay}|${h.period}|${h.disease}`)
-        );
-        const updated = [...filtered, ...newEntries];
-        try { localStorage.setItem('forecastHistory', JSON.stringify(updated)); } catch {}
-        return updated;
-      });
+      // I-fetch ang bawat year separately
+      for (const yr of yearsToFetch) {
+        try {
+          const result = await getSavedForecast(brgy, cityLabel, yr);
+          if (!result) continue;
+
+          const newEntries = buildHistoryEntries(result, brgy, cityLabel);
+          if (newEntries.length === 0) continue;
+
+          setForecastHistory(prev => {
+            const newKeys = new Set(
+              newEntries.map(h => `${h.barangay}|${h.period}|${h.disease}`)
+            );
+            const filtered = prev.filter(
+              h => !newKeys.has(`${h.barangay}|${h.period}|${h.disease}`)
+            );
+            const updated = [...filtered, ...newEntries];
+            try { localStorage.setItem('forecastHistory', JSON.stringify(updated)); } catch {}
+            return updated;
+          });
+        } catch (e) {
+          // Year walang forecast — okay lang, skip
+          console.log(`No forecast for ${brgy} year ${yr}`);
+        }
+      }
     } catch (e) { console.error(`Failed to load forecast for ${brgy}:`, e); }
     finally { setLoadingBarangay(null); }
   }
-}, [cityLabel]);
+}, [cityLabel, forecastHistory]);
 
   const showSkeleton   = isInitializing && confirmedBarangays.size > 0;
   const showNoForecast = !isInitializing && effectiveGeneratedBarangays.size === 0;

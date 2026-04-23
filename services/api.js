@@ -158,35 +158,30 @@ export const forecastAll = async (diseases, forecastMonths = 6, city = "") => {
   }
 };
 
-/**
- * Fetch a saved forecast for a barangay from DB — no training, instant result.
- * Returns null if no saved forecast exists.
- */
-export const getSavedForecast = async (barangay, city = "") => {
+export const getSavedForecast = async (barangay, city = '', forecastYear = null) => {
   try {
     const params = new URLSearchParams({ barangay });
-    if (city) params.append("city", city);
+    if (city) params.append('city', city);
+    if (forecastYear) params.append('forecast_year', forecastYear);
 
     const response = await fetch(`${API_BASE_URL}/forecast-saved?${params}`, {
       headers: getAuthHeaders(),
     });
 
-    if (response.status === 404) {
-      return null; // No saved forecast — caller should prompt user to Generate All
-    }
+    if (response.status === 404) return null;
 
     if (!response.ok) {
       if (response.status === 401) {
-        localStorage.removeItem("token");
-        throw new Error("Session expired. Please log in again.");
+        localStorage.removeItem('token');
+        throw new Error('Session expired. Please log in again.');
       }
       const err = await response.json();
-      throw new Error(err.error || "Failed to fetch saved forecast");
+      throw new Error(err.error || 'Failed to fetch saved forecast');
     }
 
     return await response.json();
   } catch (error) {
-    console.error("Get saved forecast failed:", error);
+    console.error('Get saved forecast failed:', error);
     throw error;
   }
 };
