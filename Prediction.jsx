@@ -780,9 +780,9 @@ const FilterDatePicker = ({ availableYears, selectedYear, selectedMonth, onSelec
                   </Typography>
                   {localMonth && (
                     <Typography onClick={() => setLocalMonth(null)}
-                      sx={{ fontSize: 11, color: T.blue, cursor: 'pointer', '&:hover': { opacity: 0.7 } }}>
-                      Clear month
-                    </Typography>
+  sx={{ fontSize: 11, color: T.blue, cursor: 'pointer', '&:hover': { opacity: 0.7 } }}>
+  Clear month
+</Typography>
                   )}
                 </Box>
                 <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px' }}>
@@ -2059,13 +2059,17 @@ const Prediction = ({ onNavigate, onLogout, isPublic = false }) => {
           newEntries.push(...buildHistoryEntries(r.value.result, r.value.brgy, city));
       });
       if (newEntries.length > 0) {
-        setForecastHistory(prev => {
-          const fetched  = new Set(needsRestore);
-          const filtered = prev.filter(h => !fetched.has(h.barangay));
-          const updated  = [...filtered, ...newEntries];
-          try { localStorage.setItem('forecastHistory', JSON.stringify(updated)); } catch {}
-          return updated;
-        });
+   setForecastHistory(prev => {
+  const newKeys = new Set(
+    newEntries.map(h => `${h.barangay}|${h.period}|${h.disease}`)
+  );
+  const filtered = prev.filter(
+    h => !newKeys.has(`${h.barangay}|${h.period}|${h.disease}`)
+  );
+  const updated = [...filtered, ...newEntries];
+  try { localStorage.setItem('forecastHistory', JSON.stringify(updated)); } catch {}
+  return updated;
+});
       }
     }).finally(() => setIsInitializing(false));
   }, []);
@@ -2099,28 +2103,35 @@ const Prediction = ({ onNavigate, onLogout, isPublic = false }) => {
   }, [cityLabel]);
 
   // ── FIXED: Force-reload ALL selected barangays so newly generated
-  //    forecasts (e.g. 2026) are always reflected in the filter date options
-  const handleConfirmBarangays = useCallback(async (selected) => {
-    setConfirmedBarangays(new Set(selected));
-    setSelectedYear(null);
-    setSelectedMonth(null);
+const handleConfirmBarangays = useCallback(async (selected) => {
+  setConfirmedBarangays(new Set(selected));
+  setSelectedYear(null);
+  setSelectedMonth(null);
 
-    for (const brgy of [...selected]) {
-      try {
-        setLoadingBarangay(brgy);
-        const result = await getSavedForecast(brgy, cityLabel);
-        if (!result) continue;
-        const newEntries = buildHistoryEntries(result, brgy, cityLabel);
-        setForecastHistory(prev => {
-          const filtered = prev.filter(h => h.barangay !== brgy);
-          const updated  = [...filtered, ...newEntries];
-          try { localStorage.setItem('forecastHistory', JSON.stringify(updated)); } catch {}
-          return updated;
-        });
-      } catch (e) { console.error(`Failed to load forecast for ${brgy}:`, e); }
-      finally     { setLoadingBarangay(null); }
-    }
-  }, [cityLabel]);
+  for (const brgy of [...selected]) {
+    try {
+      setLoadingBarangay(brgy);
+      const result = await getSavedForecast(brgy, cityLabel);
+      if (!result) continue;
+      const newEntries = buildHistoryEntries(result, brgy, cityLabel);
+
+      setForecastHistory(prev => {
+        // Only remove entries na exact match ng barangay + period + disease
+        // para hindi ma-wipe ang 2025 data na nandoon na
+        const newKeys = new Set(
+          newEntries.map(h => `${h.barangay}|${h.period}|${h.disease}`)
+        );
+        const filtered = prev.filter(
+          h => !newKeys.has(`${h.barangay}|${h.period}|${h.disease}`)
+        );
+        const updated = [...filtered, ...newEntries];
+        try { localStorage.setItem('forecastHistory', JSON.stringify(updated)); } catch {}
+        return updated;
+      });
+    } catch (e) { console.error(`Failed to load forecast for ${brgy}:`, e); }
+    finally { setLoadingBarangay(null); }
+  }
+}, [cityLabel]);
 
   const showSkeleton   = isInitializing && confirmedBarangays.size > 0;
   const showNoForecast = !isInitializing && effectiveGeneratedBarangays.size === 0;
