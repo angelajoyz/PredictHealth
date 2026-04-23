@@ -1631,6 +1631,102 @@ def public_disease_breakdown():
         print(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/age-sex-breakdown', methods=['GET'])
+@jwt_required()
+def age_sex_breakdown():
+    from sqlalchemy import func
+    category = request.args.get('category', '').strip()
+    barangay = request.args.get('barangay', '__ALL__').strip()
+    city     = request.args.get('city', '').strip()
+
+    if not category:
+        return jsonify({'error': 'category is required'}), 400
+
+    try:
+        q = db.session.query(BarangayData).filter(
+            BarangayData.disease_category == category
+        )
+        if barangay and barangay != '__ALL__':
+            q = q.filter(BarangayData.barangay.ilike(barangay))
+        if city:
+            q = q.filter(BarangayData.city.ilike(f'%{city}%'))
+
+        rows = q.all()
+
+        # Age band definitions: (label, male_attr, female_attr)
+        AGE_BANDS = [
+            ('0-6 days',    'days_0_6_m',      'days_0_6_f'),
+            ('7-28 days',   'days_7_28_m',      'days_7_28_f'),
+            ('29d-11mo',    'days_29_11mo_m',   'days_29_11mo_f'),
+            ('<1',          'under1_m',         'under1_f'),
+            ('1-4',         'age_1_4_m',        'age_1_4_f'),
+            ('5-9',         'age_5_9_m',        'age_5_9_f'),
+            ('10-14',       'age_10_14_m',      'age_10_14_f'),
+            ('15-19',       'age_15_19_m',      'age_15_19_f'),
+            ('20-24',       'age_20_24_m',      'age_20_24_f'),
+            ('25-29',       'age_25_29_m',      'age_25_29_f'),
+            ('30-34',       'age_30_34_m',      'age_30_34_f'),
+            ('35-39',       'age_35_39_m',      'age_35_39_f'),
+            ('40-44',       'age_40_44_m',      'age_40_44_f'),
+            ('45-49',       'age_45_49_m',      'age_45_49_f'),
+            ('50-54',       'age_50_54_m',      'age_50_54_f'),
+            ('55-59',       'age_55_59_m',      'age_55_59_f'),
+            ('60-64',       'age_60_64_m',      'age_60_64_f'),
+            ('65-69',       'age_65_69_m',      'age_65_69_f'),
+            ('70+',         'age_70above_m',    'age_70above_f'),
+            ('65+',         'age_65above_m',    'age_65above_f'),
+        ]
+
+        # Aggregate totals per age band across all rows
+        band_totals = {}
+        for label, m_attr, f_attr in AGE_BANDS:
+            total_m = sum(getattr(r, m_attr) or 0 for r in rows)
+            total_f = sum(getattr(r, f_attr) or 0 for r in rows)
+            if total_m + total_f > 0:
+                if label not in band_totals:
+                    band_totals[label] = {'male': 0, 'female': 0}
+                band_totals[label]['male']   += total_m
+                band_totals[label]['female'] += total_f
+
+        # Build ordered breakdown, skip bands with 0 cases
+        BAND_ORDER = [b[0] for b in AGE_BANDS]
+        breakdown = []
+        seen = set()
+        for label in BAND_ORDER:
+            if label in band_totals and label not in seen:
+                seen.add(label)
+                m = band_totals[label]['male']
+                f = band_totals[label]['female']
+                breakdown.append({
+                    'age_group': label,
+                    'male':      m,
+                    'female':    f,
+                    'total':     m + f,
+                })
+
+        total_male   = sum(b['male']   for b in breakdown)
+        total_female = sum(b['female'] for b in breakdown)
+        total_cases  = total_male + total_female
+
+        # Fallback: kung walang age-band data, gamitin ang total_male/female
+        if total_cases == 0 and rows:
+            total_male   = sum(r.total_male   or 0 for r in rows)
+            total_female = sum(r.total_female or 0 for r in rows)
+            total_cases  = total_male + total_female
+
+        return jsonify({
+            'category':     category,
+            'barangay':     barangay,
+            'total_male':   total_male,
+            'total_female': total_female,
+            'total_cases':  total_cases,
+            'breakdown':    breakdown,
+        }), 200
+
+    except Exception as e:
+        import traceback
+        print(traceback.format_exc())
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     init_db(app)

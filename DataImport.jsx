@@ -611,14 +611,23 @@ const DataImport = ({ onNavigate, onLogout, onDataUploaded }) => {
   };
 
   // ── trySelectFile ─────────────────────────────────────────────────────────
-  // ✅ File type is validated FIRST — before any API call is made.
   const trySelectFile = async (file) => {
-    // ── 0. Validate file type immediately — before anything else ─────────
+    // ── 0a. Validate file type immediately — before any API call ─────────
     const { valid } = validateFileType(file);
     if (!valid) {
       setSelectedFile(file);
       setValidationStatus("error");
       setValidationErrors([getFileTypeError(file)]);
+      return;
+    }
+
+    // ── 0b. Validate file size immediately — before any API call ──────────
+    if (file.size > MAX_FILE_SIZE_BYTES) {
+      setSelectedFile(file);
+      setValidationStatus("error");
+      setValidationErrors([
+        `Ang file ay masyadong malaki (${formatFileSize(file.size)}). Maximum na pinapayagan ay ${MAX_FILE_SIZE_MB} MB lamang. Bawasan ang laki ng file o hatiin sa mas maliit na file.`,
+      ]);
       return;
     }
 
@@ -814,14 +823,13 @@ const DataImport = ({ onNavigate, onLogout, onDataUploaded }) => {
   };
 
   // ── handleFileSelection — uses scanFile (no DB write) ────────────────────
-  // NOTE: File type is already validated in trySelectFile before this is called.
-  // Size check is still done here as a secondary gate.
   const handleFileSelection = async (file) => {
+    // Size check as secondary gate (primary is in trySelectFile)
     if (file.size > MAX_FILE_SIZE_BYTES) {
       setSelectedFile(file);
       setValidationStatus("error");
       setValidationErrors([
-        `File is too large (${formatFileSize(file.size)}). Maximum allowed size is ${MAX_FILE_SIZE_MB} MB.`,
+        `Ang file ay masyadong malaki (${formatFileSize(file.size)}). Maximum na pinapayagan ay ${MAX_FILE_SIZE_MB} MB lamang. Bawasan ang laki ng file o hatiin sa mas maliit na file.`,
       ]);
       return;
     }
@@ -1206,18 +1214,58 @@ const DataImport = ({ onNavigate, onLogout, onDataUploaded }) => {
                           {err}
                         </Typography>
                       ))}
-                      {/* ── Accepted formats reminder ── */}
+                      {/* ── Accepted formats + size reminder ── */}
                       <Box
                         sx={{
                           mt: 1.25,
                           pt: 1.25,
                           borderTop: `1px solid ${T.dangerBorder}`,
                           display: "flex",
-                          alignItems: "center",
-                          gap: 1,
-                          flexWrap: "wrap",
+                          flexDirection: "column",
+                          gap: 0.75,
                         }}
                       >
+                        <Box
+                          sx={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 1,
+                            flexWrap: "wrap",
+                          }}
+                        >
+                          <Typography
+                            sx={{
+                              fontSize: 11.5,
+                              color: T.danger,
+                              fontWeight: 600,
+                            }}
+                          >
+                            Mga tinatanggap:
+                          </Typography>
+                          {[".xlsx", ".xls", ".csv"].map((fmt) => (
+                            <Box
+                              key={fmt}
+                              sx={{
+                                px: "8px",
+                                py: "2px",
+                                borderRadius: "4px",
+                                backgroundColor: "#FEE2E2",
+                                border: `1px solid ${T.dangerBorder}`,
+                              }}
+                            >
+                              <Typography
+                                sx={{
+                                  fontSize: 11,
+                                  fontWeight: 700,
+                                  color: T.danger,
+                                  lineHeight: 1,
+                                }}
+                              >
+                                {fmt}
+                              </Typography>
+                            </Box>
+                          ))}
+                        </Box>
                         <Typography
                           sx={{
                             fontSize: 11.5,
@@ -1225,31 +1273,9 @@ const DataImport = ({ onNavigate, onLogout, onDataUploaded }) => {
                             fontWeight: 600,
                           }}
                         >
-                          Mga tinatanggap:
+                          Maximum file size:{" "}
+                          <strong>{MAX_FILE_SIZE_MB} MB</strong>
                         </Typography>
-                        {[".xlsx", ".xls", ".csv"].map((fmt) => (
-                          <Box
-                            key={fmt}
-                            sx={{
-                              px: "8px",
-                              py: "2px",
-                              borderRadius: "4px",
-                              backgroundColor: "#FEE2E2",
-                              border: `1px solid ${T.dangerBorder}`,
-                            }}
-                          >
-                            <Typography
-                              sx={{
-                                fontSize: 11,
-                                fontWeight: 700,
-                                color: T.danger,
-                                lineHeight: 1,
-                              }}
-                            >
-                              {fmt}
-                            </Typography>
-                          </Box>
-                        ))}
                       </Box>
                     </Box>
                   )}

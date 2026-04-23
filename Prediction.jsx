@@ -141,12 +141,11 @@ const getTrendFromEntries = (diseaseEntries) => {
 const getFilenameSuffix = (selectedMonth, selectedYear) => {
   if (selectedMonth && selectedYear) {
     const mName = MONTH_NAMES[parseInt(selectedMonth, 10) - 1] || selectedMonth;
-    return `${mName}${selectedYear}`;           // e.g. "April2026"
+    return `${mName}${selectedYear}`;
   }
-  if (selectedYear) return selectedYear;         // e.g. "2026"
-  // fallback: current month + year
+  if (selectedYear) return selectedYear;
   const now = new Date();
-  return `${MONTH_NAMES[now.getMonth()]}${now.getFullYear()}`; // e.g. "April2026"
+  return `${MONTH_NAMES[now.getMonth()]}${now.getFullYear()}`;
 };
 
 // ── Trend Legend ──────────────────────────────────────────────────────────────
@@ -868,10 +867,8 @@ const exportTableData = async (format, forecastHistory, selectedBarangays, avail
 
   const city = localStorage.getItem('datasetCity') || '';
 
-  // ── Filename suffix based on selected month/year ───────────────────────────
   const filenameSuffix = getFilenameSuffix(selectedMonth, selectedYear);
 
-  // build rows
   const rows = [];
   [...selectedBarangays].forEach(barangay => {
     const diseaseTrendMap = {};
@@ -893,7 +890,6 @@ const exportTableData = async (format, forecastHistory, selectedBarangays, avail
 
   if (rows.length === 0) return;
 
-  // ── CSV ──────────────────────────────────────────────────────────────────────
   if (format === 'csv') {
     const headers = ['Barangay', 'Year', 'Month', 'Disease Category', 'Predicted Cases', 'Trend'];
     const csvRows = [
@@ -908,7 +904,6 @@ const exportTableData = async (format, forecastHistory, selectedBarangays, avail
     return;
   }
 
-  // ── TXT ──────────────────────────────────────────────────────────────────────
   if (format === 'txt') {
     const lines = ['PREDICTHEALTH — BARANGAY FORECAST REPORT', '='.repeat(66)];
     if (cityLabel) lines.push(`City     : ${cityLabel}`);
@@ -949,7 +944,6 @@ const exportTableData = async (format, forecastHistory, selectedBarangays, avail
     return;
   }
 
-  // ── PDF data builder ──────────────────────────────────────────────────────────
   if (format === 'pdf_data') {
     const cityDiseaseMap = {};
     rows.forEach(r => {
@@ -1028,10 +1022,8 @@ const ExportMenu = ({ forecastHistory, confirmedBarangays, availableDiseases, ci
 
         const { rows, cityDiseases, cityTotal, barangayList, forecastPeriod, genDate } = result;
 
-        // ── Filename suffix for docx ──────────────────────────────────────────
         const filenameSuffix = getFilenameSuffix(selectedMonth, selectedYear);
 
-        // ── Shared style helpers ────────────────────────────────────────────────
         const border  = { style: BorderStyle.SINGLE, size: 1, color: 'CCCCCC' };
         const borders = { top: border, bottom: border, left: border, right: border };
         const noBorder = { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' };
@@ -1249,7 +1241,6 @@ const ExportMenu = ({ forecastHistory, confirmedBarangays, availableDiseases, ci
           })]})],
         });
 
-        // ── Build document ──────────────────────────────────────────────────────
         const children = [];
         const increasingCount = cityDiseases.filter(d => d.trend === 'Increasing').length;
 
@@ -1605,7 +1596,7 @@ const ExportMenu = ({ forecastHistory, confirmedBarangays, availableDiseases, ci
         const url  = URL.createObjectURL(blob);
         const a    = document.createElement('a');
         a.href     = url;
-        a.download = `forecast_${filenameSuffix}.docx`;  // ← updated filename
+        a.download = `forecast_${filenameSuffix}.docx`;
         a.click();
         URL.revokeObjectURL(url);
 
@@ -2107,15 +2098,14 @@ const Prediction = ({ onNavigate, onLogout, isPublic = false }) => {
     finally     { setDetailLoading(false); }
   }, [cityLabel]);
 
+  // ── FIXED: Force-reload ALL selected barangays so newly generated
+  //    forecasts (e.g. 2026) are always reflected in the filter date options
   const handleConfirmBarangays = useCallback(async (selected) => {
     setConfirmedBarangays(new Set(selected));
     setSelectedYear(null);
     setSelectedMonth(null);
 
-    const existingBarangays = new Set(forecastHistory.map(h => h.barangay).filter(Boolean));
-    const missing = [...selected].filter(b => !existingBarangays.has(b));
-
-    for (const brgy of missing) {
+    for (const brgy of [...selected]) {
       try {
         setLoadingBarangay(brgy);
         const result = await getSavedForecast(brgy, cityLabel);
@@ -2130,7 +2120,7 @@ const Prediction = ({ onNavigate, onLogout, isPublic = false }) => {
       } catch (e) { console.error(`Failed to load forecast for ${brgy}:`, e); }
       finally     { setLoadingBarangay(null); }
     }
-  }, [forecastHistory, cityLabel]);
+  }, [cityLabel]);
 
   const showSkeleton   = isInitializing && confirmedBarangays.size > 0;
   const showNoForecast = !isInitializing && effectiveGeneratedBarangays.size === 0;
