@@ -179,7 +179,7 @@ const AppInner = () => {
           borderRadius: "16px",
           overflow: "hidden",
           boxShadow: "0 24px 64px rgba(0,0,0,0.2)",
-          width: 400,
+          width: forgotInModal ? 780 : 400,
           m: 2,
         },
       }}
