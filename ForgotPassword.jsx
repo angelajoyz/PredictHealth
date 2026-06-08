@@ -619,7 +619,7 @@ const ForgotPassword = ({ onBack, token = null }) => {
 
   return (
     <Box sx={{
-      minHeight: "100vh",
+      height: 520,
       display: "flex",
       backgroundColor: T.sidebarBg,
       overflow: "hidden",
